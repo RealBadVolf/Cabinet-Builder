@@ -33,6 +33,9 @@ const DEFAULT_CONFIG = {
   legCount:0, legMargin:100, legHoleCount:4, legHoleDia:4,
   legBoltCircle:45, legHoleDepth:12, legCenterHole:false, legCenterDia:5,
   shelfGrooves:true, shelfGrooveWidth:10, shelfGrooveDepth:10, shelfGrooveInset:12,
+  drawers:[], drawerGap:3, drawerConstruction:'dado', drawerFaceType:'applied',
+  drawerSideThickness:15, drawerBottomThickness:6, drawerSlideType:'undermount',
+  drawerSlideClearance:12.7, drawerBottomDadoHeight:10, drawerBottomDadoDepth:6,
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -321,7 +324,7 @@ export default function CabinetStudio({ cabinetId, user, api }) {
   },[parts,dados,drills,doorParts,cfg,totalParts,dStyle]);
 
   const tabs=[{id:'design',label:'Design'},{id:'cuts',label:`Cut List (${totalParts})`},{id:'ops',label:`Operations (${dados.length+drills.length})`}];
-  const cfgSecs=[{id:'case',label:'Case'},{id:'joinery',label:'Joinery'},{id:'shelves',label:'Shelves'},{id:'doors',label:'Doors'},{id:'hardware',label:'Hardware'}];
+  const cfgSecs=[{id:'case',label:'Case'},{id:'joinery',label:'Joinery'},{id:'shelves',label:'Shelves'},{id:'drawers',label:'Drawers'},{id:'doors',label:'Doors'},{id:'hardware',label:'Hardware'}];
 
   if (loadingCab) return <div style={{padding:40,color:'#8a7e6a',textAlign:'center'}}>Loading cabinet...</div>;
 
@@ -486,6 +489,76 @@ export default function CabinetStudio({ cabinetId, user, api }) {
                     Groove: {cfg.shelfGrooveWidth||(cfg.pinDia+2)}mm wide × {cfg.shelfGrooveDepth||10}mm deep, {cfg.shelfGrooveInset||12}mm from edge.
                   </div>
                 </>}
+              </>}
+            </>}
+            {cfgSec==='drawers'&&<>
+              <div className="cs-sec">Drawer Stack</div>
+              <div style={{display:'flex',gap:6,marginBottom:8}}>
+                <button style={{fontFamily:'inherit',fontSize:10,padding:'5px 12px',borderRadius:3,cursor:'pointer',
+                  border:'1px solid #3a3228',background:'#332d24',color:'#c49355'}}
+                  onClick={()=>{
+                    const drawers=[...(cfg.drawers||[]),{boxHeight:120,faceHeight:160}];
+                    u('drawers',drawers);
+                  }}>+ Add Drawer</button>
+                {(cfg.drawers||[]).length>0&&<button style={{fontFamily:'inherit',fontSize:10,padding:'5px 12px',
+                  borderRadius:3,cursor:'pointer',border:'1px solid #3a3228',background:'transparent',color:'#c05050'}}
+                  onClick={()=>{
+                    const drawers=[...(cfg.drawers||[])];drawers.pop();u('drawers',drawers);
+                  }}>Remove Last</button>}
+              </div>
+              {(cfg.drawers||[]).length===0&&
+                <div style={{padding:'12px',background:'#252119',borderRadius:4,fontSize:10,color:'#8a7e6a'}}>
+                  No drawers. Add drawers for a drawer-base cabinet. Doors are hidden when drawers are present.
+                </div>}
+              {(cfg.drawers||[]).map((dr,i)=>(
+                <div key={i} style={{marginBottom:10,padding:'10px 12px',background:'#252119',borderRadius:4,border:'1px solid #332d24'}}>
+                  <div style={{fontSize:10,fontWeight:600,color:'#c49355',marginBottom:6}}>Drawer {i+1}</div>
+                  <div className="cs-param"><span className="cs-label">Box height</span>
+                    <div style={{display:'flex',alignItems:'center',gap:6,flex:1}}>
+                      <input type="range" min={50} max={350} step={5} value={dr.boxHeight||120}
+                        style={{flex:1,accentColor:'#c49355'}}
+                        onChange={e=>{const d=[...(cfg.drawers||[])];d[i]={...d[i],boxHeight:parseInt(e.target.value)};u('drawers',d);}}/>
+                      <input type="number" min={50} max={350} step={5} value={dr.boxHeight||120}
+                        className="cs-num" style={{width:60}}
+                        onChange={e=>{const d=[...(cfg.drawers||[])];d[i]={...d[i],boxHeight:parseInt(e.target.value)||120};u('drawers',d);}}/>
+                      <span style={{fontSize:10,color:'#8a7e6a'}}>mm</span>
+                    </div>
+                  </div>
+                  <div className="cs-param"><span className="cs-label">Face height</span>
+                    <div style={{display:'flex',alignItems:'center',gap:6,flex:1}}>
+                      <input type="range" min={60} max={400} step={5} value={dr.faceHeight||160}
+                        style={{flex:1,accentColor:'#e0aa6a'}}
+                        onChange={e=>{const d=[...(cfg.drawers||[])];d[i]={...d[i],faceHeight:parseInt(e.target.value)};u('drawers',d);}}/>
+                      <input type="number" min={60} max={400} step={5} value={dr.faceHeight||160}
+                        className="cs-num" style={{width:60}}
+                        onChange={e=>{const d=[...(cfg.drawers||[])];d[i]={...d[i],faceHeight:parseInt(e.target.value)||160};u('drawers',d);}}/>
+                      <span style={{fontSize:10,color:'#8a7e6a'}}>mm</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {(cfg.drawers||[]).length>0&&<>
+                <div className="cs-sec">Drawer Construction</div>
+                <Sel label="Joinery" value={cfg.drawerConstruction||'dado'} onChange={v=>u('drawerConstruction',v)}
+                  options={[['dado','Dado Joint'],['box_joint','Box Joint (Finger)'],['dovetail','Dovetail'],['butt','Butt Joint'],['pocket_screw','Pocket Screw']]}/>
+                <Sel label="Face type" value={cfg.drawerFaceType||'applied'} onChange={v=>u('drawerFaceType',v)}
+                  options={[['applied','Applied (separate face)'],['integrated','Integrated (front IS face)'],['inset','Inset (flush)']]}/>
+                <Sel label="Slide type" value={cfg.drawerSlideType||'undermount'} onChange={v=>u('drawerSlideType',v)}
+                  options={[['undermount','Undermount (Blum etc)'],['side_mount','Side Mount'],['center_mount','Center Mount']]}/>
+                <div className="cs-sec">Drawer Dimensions</div>
+                <Num label="Side thickness" value={cfg.drawerSideThickness||15} onChange={v=>u('drawerSideThickness',v)} min={10} max={25}/>
+                <Num label="Bottom thickness" value={cfg.drawerBottomThickness||6} onChange={v=>u('drawerBottomThickness',v)} min={3} max={12}/>
+                <Num label="Slide clearance" value={cfg.drawerSlideClearance||12.7} onChange={v=>u('drawerSlideClearance',v)} min={5} max={25} step={.1}/>
+                <Num label="Face gap" value={cfg.drawerGap??3} onChange={v=>u('drawerGap',v)} min={1} max={10} step={.5}/>
+                <Num label="Btm dado height" value={cfg.drawerBottomDadoHeight||10} onChange={v=>u('drawerBottomDadoHeight',v)} min={5} max={20}/>
+                <div style={{marginTop:8,padding:'8px 10px',background:'#252119',borderRadius:4,fontSize:10,color:'#8a7e6a',lineHeight:1.6}}>
+                  {(cfg.drawers||[]).length} drawer{(cfg.drawers||[]).length!==1?'s':''} •
+                  {' '}{cfg.drawerConstruction||'dado'} construction •
+                  {' '}{cfg.drawerFaceType||'applied'} faces •
+                  {' '}{cfg.drawerSlideClearance||12.7}mm slide clearance per side.
+                  Total face height: {(cfg.drawers||[]).reduce((s,d)=>(d.faceHeight||160)+(cfg.drawerGap??3)+s,-(cfg.drawerGap??3))}mm
+                  {' '}of {cfg.height-(cfg.toeKickHeight||100)}mm case.
+                </div>
               </>}
             </>}
             {cfgSec==='doors'&&<>

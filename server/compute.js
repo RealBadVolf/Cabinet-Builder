@@ -1,7 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// Cabinet computation engine v4 — All mm
-// New: dado allowance, adjustable leg hole patterns
-// DXF: X = part length, Y = part width
+// Cabinet computation engine v5 — All mm
+// New: drawer boxes, custom shelf heights, multiple construction methods
 // ═══════════════════════════════════════════════════════════════════════════
 
 const DOOR_STYLES = {
@@ -16,7 +15,9 @@ export function computeCabinet(cfg) {
   const dadoD=cfg.dadoDepth||10, rabD=cfg.rabbetDepth||10;
   const height=cfg.height||760, width=cfg.width||600, depth=cfg.depth||580;
   const toeKickStyle=cfg.toeKickStyle||'integral';
-  const tkH=(toeKickStyle==='none')?0:(cfg.toeKickHeight||100), tkRecess=cfg.toeKickRecess||75;
+  const tkH=(toeKickStyle==='none'||toeKickStyle==='legs')?
+    (toeKickStyle==='legs'?(cfg.toeKickHeight||150):0):(cfg.toeKickHeight||100);
+  const tkRecess=cfg.toeKickRecess||75;
   const shelfCount=cfg.shelfCount||0, shelfType=cfg.shelfType||'adjustable';
   const doorCount=cfg.doorCount??1, doorOverlay=cfg.doorOverlay||12;
   const doorGap=cfg.doorGap||3, doorReveal=cfg.doorReveal||3;
@@ -27,24 +28,35 @@ export function computeCabinet(cfg) {
   const pinZoneStart=cfg.pinZoneStart||80, pinZoneEnd=cfg.pinZoneEnd||80;
   const hingeBoreDia=cfg.hingeBoreDia||35, hingeBoreDepth=cfg.hingeBoreDepth||13;
   const hingeBoreFromEdge=cfg.hingeBoreFromEdge||22;
+  const dadoAllowance=cfg.dadoAllowance??0.2;
+  const dadoW=mt+dadoAllowance;
 
-  // ─── NEW: Dado allowance ──────────────────────────────────────────────
-  // Added to every dado width so parts fit snugly without being too tight.
-  // Typical: 0.2mm for plywood. Set to 0 for perfect-thickness material.
-  const dadoAllowance = cfg.dadoAllowance ?? 0.2;
+  // Leg config
+  const legCount=cfg.legCount||0, legMargin=cfg.legMargin||100;
+  const legHoleCount=cfg.legHoleCount||4, legHoleDia=cfg.legHoleDia||4;
+  const legBoltCircle=cfg.legBoltCircle||45, legHoleDepth=cfg.legHoleDepth||12;
+  const legCenterHole=cfg.legCenterHole||false, legCenterDia=cfg.legCenterDia||5;
 
-  // ─── NEW: Leg configuration ───────────────────────────────────────────
-  const legCount      = cfg.legCount || 0;            // 0 = no legs
-  const legMargin     = cfg.legMargin || 100;         // mm from panel edges to leg center
-  const legHoleCount  = cfg.legHoleCount || 4;        // screw holes per leg
-  const legHoleDia    = cfg.legHoleDia || 4;          // screw hole diameter
-  const legBoltCircle = cfg.legBoltCircle || 45;      // bolt circle diameter
-  const legHoleDepth  = cfg.legHoleDepth || 12;       // hole depth
-  const legCenterHole = cfg.legCenterHole || false;    // center pilot hole
-  const legCenterDia  = cfg.legCenterDia || 5;        // center hole diameter
+  // ─── Drawer config ────────────────────────────────────────────────────
+  const drawers         = cfg.drawers || [];        // [{boxHeight,faceHeight},...] 
+  const drawerGap       = cfg.drawerGap ?? 3;       // gap between drawer faces
+  const drawerConstruct = cfg.drawerConstruction || 'dado'; // dado|box_joint|butt|dovetail|pocket_screw
+  const drawerFaceType  = cfg.drawerFaceType || 'applied'; // applied|integrated|inset
+  const drawerSideT     = cfg.drawerSideThickness || 15;
+  const drawerBottomT   = cfg.drawerBottomThickness || 6;
+  const drawerSlideType = cfg.drawerSlideType || 'undermount';
+  const drawerSlideClear= cfg.drawerSlideClearance || 12.7; // mm per side (Blum undermount)
+  const drawerBtmDadoH  = cfg.drawerBottomDadoHeight || 10; // mm from bottom edge to dado
+  const drawerBtmDadoD  = cfg.drawerBottomDadoDepth || 6;   // dado depth for bottom panel
 
-  // Effective dado width = material thickness + allowance
-  const dadoW = mt + dadoAllowance;
+  // Custom shelf positions (overrides even distribution)
+  const shelfPositions  = cfg.shelfPositions || null; // [300, 450] mm from bottom of case
+
+  // Shelf groove config
+  const shelfGrooves  = (cfg.shelfGrooves!==false)&&(shelfType==='adjustable');
+  const grooveWidth   = cfg.shelfGrooveWidth||(pinDia+2);
+  const grooveDepth   = cfg.shelfGrooveDepth||10;
+  const grooveInset   = cfg.shelfGrooveInset||12;
 
   const integratedTK=(toeKickStyle==='integral');
   const sideH=integratedTK?height:(height-tkH);
@@ -58,56 +70,46 @@ export function computeCabinet(cfg) {
   const code=()=>'P'+String(++pIdx).padStart(3,'0');
 
   // ═══ SIDE PANELS ═══
-  for (const side of ['L','R']) {
+  for(const side of ['L','R']){
     const sc=code();
     const isR=(side==='R');
-    parts.push({code:sc,
-      name:'Side Panel ('+side+')',
+    parts.push({code:sc,name:'Side Panel ('+side+')',
       partType:isR?'side_right':'side_left',
       len:sideH, w:depth, t:mt, qty:1,
-      notes:integratedTK
-        ? 'Full height. Notch '+tkH+'x'+tkRecess+'mm.'+(isR?' MIRRORED.':'')
-        + (dadoAllowance>0?' Dado allowance: +'+dadoAllowance+'mm.':'')
-        : 'See ops.',
-      hasNotch:integratedTK, notchH:tkH, notchD:tkRecess,
-      mirror:isR});
+      notes:integratedTK?'Full height. Notch '+tkH+'x'+tkRecess+'mm.'+(isR?' MIRRORED.':'')
+        +(dadoAllowance>0?' Dado +'+dadoAllowance+'mm.':''):'See ops.',
+      hasNotch:integratedTK, notchH:tkH, notchD:tkRecess, mirror:isR});
 
-    // Bottom panel dado (uses dadoW = mt + allowance)
+    // Bottom panel dado
     dados.push({partCode:sc, opType:'dado', cutW:dadoW, cutD:dadoD,
-      fromEdge:'bottom', dist:bottomPos, cutLen:depth-bpt,
-      depthStart:0,
-      note:'Bottom panel dado ('+dadoW+'mm wide, incl. '+dadoAllowance+'mm allowance)'});
-
+      fromEdge:'bottom', dist:bottomPos, cutLen:depth-bpt, depthStart:0,
+      note:'Bottom panel dado ('+dadoW.toFixed(2)+'mm)'});
     // Front nailer dado
     dados.push({partCode:sc, opType:'dado', cutW:dadoW, cutD:dadoD,
-      fromEdge:'top', dist:0, cutLen:nailerH,
-      depthStart:0,
+      fromEdge:'top', dist:0, cutLen:nailerH, depthStart:0,
       note:'Front nailer dado'});
-
     // Rear nailer dado
     dados.push({partCode:sc, opType:'dado', cutW:dadoW, cutD:dadoD,
-      fromEdge:'top', dist:0, cutLen:nailerH,
-      depthStart:depth-nailerH,
+      fromEdge:'top', dist:0, cutLen:nailerH, depthStart:depth-nailerH,
       note:'Rear nailer dado'});
-
-    // Back panel rabbet (rabbet width = bpt + 1, no allowance needed)
+    // Back panel rabbet
     const rabbetLen=integratedTK?(sideH-tkH):sideH;
     dados.push({partCode:sc, opType:'rabbet', cutW:bpt+1, cutD:rabD,
       fromEdge:'rear', dist:0, cutLen:rabbetLen,
       note:'Back panel rabbet — '+rabbetLen+'mm'});
 
-    // Fixed shelf dados
+    // Fixed shelf dados (custom positions or evenly distributed)
     if(shelfType==='fixed'&&shelfCount>0){
-      const intCaseH=caseH-2*mt, sp=intCaseH/(shelfCount+1);
-      for(let i=1;i<=shelfCount;i++){
+      const positions=getShelfPositions(shelfCount, caseH, mt, shelfPositions);
+      for(let i=0;i<positions.length;i++){
+        const fromBtm=bottomPos+positions[i];
         dados.push({partCode:sc, opType:'dado', cutW:dadoW, cutD:dadoD,
-          fromEdge:'bottom', dist:bottomPos+mt+sp*i, cutLen:depth-bpt,
-          depthStart:0,
-          note:'Fixed shelf #'+i+' ('+dadoW+'mm wide)'});
+          fromEdge:'bottom', dist:fromBtm, cutLen:depth-bpt, depthStart:0,
+          note:'Fixed shelf #'+(i+1)+' at '+Math.round(positions[i])+'mm'});
       }
     }
 
-    // Shelf pin holes
+    // Shelf pin holes (only if adjustable shelves)
     if(shelfType==='adjustable'&&shelfCount>0){
       const zStart=bottomPos+mt+pinZoneStart;
       const zEnd=sideH-mt-pinZoneEnd;
@@ -132,48 +134,32 @@ export function computeCabinet(cfg) {
   const btmCode=code();
   parts.push({code:btmCode,name:'Bottom Panel',partType:'bottom',
     len:btmW,w:btmD,t:mt,qty:1,
-    notes:'Into side dados. Front flush.'
-      +(legCount>0?' Leg mounting holes on underside.':'')});
+    notes:'Into side dados.'+(legCount>0?' Leg mounting holes.':'')});
 
-  // ═══ LEG MOUNTING HOLES ═══
+  // Leg mounting
   if(legCount>0){
-    // Calculate leg center positions on the bottom panel
-    const legPositions = computeLegPositions(legCount, btmW, btmD, legMargin);
-
-    // For each leg, generate bolt circle holes
-    const allHoles = [];
-    for(const pos of legPositions){
-      // Bolt circle: N holes evenly spaced on a circle
-      const boltR = legBoltCircle / 2;
-      for(let h=0; h<legHoleCount; h++){
-        const angle = (2 * Math.PI * h) / legHoleCount - Math.PI/2; // start from top
-        allHoles.push({
-          x: pos.x + boltR * Math.cos(angle),
-          y: pos.y + boltR * Math.sin(angle)
-        });
+    const legPos=computeLegPositions(legCount, btmW, btmD, legMargin);
+    const allHoles=[];
+    for(const pos of legPos){
+      const boltR=legBoltCircle/2;
+      for(let h=0;h<legHoleCount;h++){
+        const angle=(2*Math.PI*h)/legHoleCount-Math.PI/2;
+        allHoles.push({x:pos.x+boltR*Math.cos(angle), y:pos.y+boltR*Math.sin(angle)});
       }
-      // Optional center pilot hole
-      if(legCenterHole){
-        allHoles.push({x:pos.x, y:pos.y, isCenterHole:true});
-      }
+      if(legCenterHole) allHoles.push({x:pos.x, y:pos.y, isCenterHole:true});
     }
-
-    // Screw holes
     drills.push({partCode:btmCode, opType:'leg_mount',
       dia:legHoleDia, dep:legHoleDepth,
       holes:allHoles.filter(h=>!h.isCenterHole),
       heightStart:0, spacing:0, count:allHoles.filter(h=>!h.isCenterHole).length,
       depthPositions:[0],
-      note:legCount+' legs, '+legHoleCount+' holes each ('+legHoleDia+'mm), bolt circle '+legBoltCircle+'mm, margin '+legMargin+'mm'});
-
-    // Center pilot holes (separate operation, may be different diameter)
+      note:legCount+' legs, '+legHoleCount+' holes each'});
     if(legCenterHole){
       drills.push({partCode:btmCode, opType:'leg_center',
         dia:legCenterDia, dep:legHoleDepth,
         holes:allHoles.filter(h=>h.isCenterHole),
-        heightStart:0, spacing:0, count:legPositions.length,
-        depthPositions:[0],
-        note:legCount+' center pilot holes ('+legCenterDia+'mm)'});
+        heightStart:0, spacing:0, count:legPos.length,
+        depthPositions:[0], note:legCount+' center pilot holes'});
     }
   }
 
@@ -181,54 +167,30 @@ export function computeCabinet(cfg) {
   if(shelfCount>0){
     const shW=shelfType==='fixed'?intW+2*dadoD:intW-1;
     const shD=shelfType==='fixed'?depth-bpt-mt+dadoD:depth-bpt-6;
-
-    // Shelf pin groove config (for adjustable shelves)
-    const shelfGrooves   = (cfg.shelfGrooves !== false) && (shelfType==='adjustable');
-    const grooveWidth    = cfg.shelfGrooveWidth || (pinDia + 2);  // pin dia + 2mm clearance
-    const grooveDepth    = cfg.shelfGrooveDepth || 10;            // = pin extension from panel
-    const grooveInset    = cfg.shelfGrooveInset || 12;            // how far from edge inward
-
-    // Compute pin depth positions (same as pin drilling rows)
-    const pinDepthPos = [pinInsetF];
+    const pinDepthPos=[pinInsetF];
     if(pinRowsPerSide>=2) pinDepthPos.push(depth-bpt-pinInsetR);
-    if(pinRowsPerSide>2){
-      const total=depth-bpt-pinInsetF-pinInsetR;
-      for(let r=1;r<pinRowsPerSide-1;r++)
-        pinDepthPos.push(pinInsetF+r*(total/(pinRowsPerSide-1)));
-    }
 
-    // Generate each shelf as its own part (so each gets its own grooves in DXF)
-    for(let si=0; si<shelfCount; si++){
-      const shCode = code();
-      const shelfLabel = shelfCount>1 ? 'Shelf '+(si+1) : 'Adjustable Shelf';
+    for(let si=0;si<shelfCount;si++){
+      const shCode=code();
+      const label=shelfCount>1?'Shelf '+(si+1):'Adjustable Shelf';
       parts.push({code:shCode,
-        name:shelfType==='fixed'?'Fixed Shelf':shelfLabel,
+        name:shelfType==='fixed'?'Fixed Shelf '+(si+1):label,
         partType:shelfType==='fixed'?'fixed_shelf':'adjustable_shelf',
         len:shW,w:shD,t:mt,qty:1,
         notes:shelfType==='fixed'?'In dado'
-          :'On pins'+(shelfGrooves?', with pin-lock grooves ('+pinDepthPos.length+' per side)':'')});
+          :'On pins'+(shelfGrooves?', pin-lock grooves':'')});
 
-      // Add pin-lock grooves to adjustable shelves
-      if(shelfGrooves){
-        // Grooves on LEFT edge (X=0) — for left side panel pins
+      if(shelfGrooves&&shelfType==='adjustable'){
         for(const pinY of pinDepthPos){
-          const grooveY = pinY - grooveWidth/2;
-          dados.push({partCode:shCode, opType:'dado',
-            cutW:grooveInset, cutD:grooveDepth,
-            fromEdge:'bottom', dist:0, cutLen:grooveWidth,
-            depthStart:grooveY,
-            dxfX:0, dxfY:grooveY, dxfW:grooveInset, dxfH:grooveWidth,
-            note:'Pin-lock groove, left edge, Y='+Math.round(pinY)+'mm'});
-        }
-        // Grooves on RIGHT edge (X=shW) — for right side panel pins
-        for(const pinY of pinDepthPos){
-          const grooveY = pinY - grooveWidth/2;
-          dados.push({partCode:shCode, opType:'dado',
-            cutW:grooveInset, cutD:grooveDepth,
-            fromEdge:'top', dist:0, cutLen:grooveWidth,
-            depthStart:grooveY,
-            dxfX:shW-grooveInset, dxfY:grooveY, dxfW:grooveInset, dxfH:grooveWidth,
-            note:'Pin-lock groove, right edge, Y='+Math.round(pinY)+'mm'});
+          const gy=pinY-grooveWidth/2;
+          dados.push({partCode:shCode, opType:'dado', cutW:grooveInset, cutD:grooveDepth,
+            fromEdge:'bottom', dist:0, cutLen:grooveWidth, depthStart:gy,
+            dxfX:0, dxfY:gy, dxfW:grooveInset, dxfH:grooveWidth,
+            note:'Pin-lock groove, left, Y='+Math.round(pinY)});
+          dados.push({partCode:shCode, opType:'dado', cutW:grooveInset, cutD:grooveDepth,
+            fromEdge:'top', dist:0, cutLen:grooveWidth, depthStart:gy,
+            dxfX:shW-grooveInset, dxfY:gy, dxfW:grooveInset, dxfH:grooveWidth,
+            note:'Pin-lock groove, right, Y='+Math.round(pinY)});
         }
       }
     }
@@ -246,35 +208,36 @@ export function computeCabinet(cfg) {
     len:backW,w:backH,t:bpt,qty:1,notes:'In rabbet. Glue + pin nail.'});
 
   // ═══ TOE KICK ═══
-  if(toeKickStyle!=='none'&&toeKickStyle!=='legs')
+  if(toeKickStyle==='integral'||toeKickStyle==='separate_plinth')
     parts.push({code:code(),name:'Toe Kick Plate',partType:'toe_kick',
       len:intW,w:tkH-mt,t:mt,qty:1,notes:'Recessed '+tkRecess+'mm.'});
+
+  // ═══ DRAWERS ═══
+  if(drawers.length>0){
+    computeDrawers(cfg, drawers, parts, dados, drills, code, {
+      intW, depth, bpt, mt, caseH, bottomPos,
+      drawerSideT, drawerBottomT, drawerSlideClear, drawerSlideType,
+      drawerConstruct, drawerFaceType, drawerBtmDadoH, drawerBtmDadoD,
+      drawerGap, doorOverlay, doorReveal, dadoAllowance, dmt
+    });
+  }
 
   // ═══ DOORS ═══
   const dStyleObj=DOOR_STYLES[doorStyle]||DOOR_STYLES.shaker;
   const isRS=dStyleObj.rail>0;
   const dH=caseH+2*doorOverlay-2*doorReveal;
 
-  if(doorCount===1){
-    const dW=width+2*doorOverlay-2*doorReveal;
-    if(isRS){
-      addDoorRS(parts,drills,code,dStyleObj,dH,dW,dmt,hingeBoreDia,hingeBoreDepth,hingeBoreFromEdge,'Door',doorStyle);
-    } else {
-      const dc=code();
-      parts.push({code:dc,name:'Door',partType:'door',len:dH,w:dW,t:dmt,qty:1,
-        notes:'Slab. Full overlay. 2 hinges.'});
-      addHinges(drills,dc,dH,hingeBoreDia,hingeBoreDepth,hingeBoreFromEdge);
-    }
-  } else if(doorCount===2){
-    const dW=width/2+doorOverlay-doorGap/2-doorReveal;
-    for(const label of ['L','R']){
-      if(isRS){
-        addDoorRS(parts,drills,code,dStyleObj,dH,dW,dmt,hingeBoreDia,hingeBoreDepth,hingeBoreFromEdge,'Door '+label,doorStyle);
-      } else {
-        const dc=code();
-        parts.push({code:dc,name:'Door ('+label+')',partType:'door',len:dH,w:dW,t:dmt,qty:1,
-          notes:'Slab. '+doorGap+'mm gap. 2 hinges.'});
-        addHinges(drills,dc,dH,hingeBoreDia,hingeBoreDepth,hingeBoreFromEdge);
+  if(doorCount>0 && drawers.length===0){
+    // Only generate doors if no drawers (drawer cabinets have drawer faces instead)
+    if(doorCount===1){
+      const dW=width+2*doorOverlay-2*doorReveal;
+      if(isRS) addDoorRS(parts,drills,code,dStyleObj,dH,dW,dmt,hingeBoreDia,hingeBoreDepth,hingeBoreFromEdge,'Door',doorStyle);
+      else { const dc=code(); parts.push({code:dc,name:'Door',partType:'door',len:dH,w:dW,t:dmt,qty:1,notes:'Slab. 2 hinges.'}); addHinges(drills,dc,dH,hingeBoreDia,hingeBoreDepth,hingeBoreFromEdge); }
+    } else if(doorCount===2){
+      const dW=width/2+doorOverlay-doorGap/2-doorReveal;
+      for(const label of ['L','R']){
+        if(isRS) addDoorRS(parts,drills,code,dStyleObj,dH,dW,dmt,hingeBoreDia,hingeBoreDepth,hingeBoreFromEdge,'Door '+label,doorStyle);
+        else { const dc=code(); parts.push({code:dc,name:'Door ('+label+')',partType:'door',len:dH,w:dW,t:dmt,qty:1,notes:'Slab. 2 hinges.'}); addHinges(drills,dc,dH,hingeBoreDia,hingeBoreDepth,hingeBoreFromEdge); }
       }
     }
   }
@@ -284,98 +247,221 @@ export function computeCabinet(cfg) {
 
 
 // ═══════════════════════════════════════════════════════════════════════════
-// LEG PLACEMENT — distributes N legs within a margin rectangle
+// SHELF POSITION HELPER
+// ═══════════════════════════════════════════════════════════════════════════
+function getShelfPositions(count, caseH, mt, customPositions) {
+  if(customPositions && customPositions.length>0){
+    return customPositions.slice(0, count);
+  }
+  // Even distribution
+  const intH=caseH-2*mt;
+  const sp=intH/(count+1);
+  const positions=[];
+  for(let i=1;i<=count;i++) positions.push(mt+sp*i);
+  return positions;
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DRAWER COMPUTATION
 // ═══════════════════════════════════════════════════════════════════════════
 //
-// Strategy:
-//   4 legs → 4 corners
-//   5 legs → 4 corners + 1 center
-//   6 legs → 4 corners + 2 midpoints on long edges
-//   7 legs → 4 corners + 1 center + 2 midpoints on long edges
-//   8 legs → 4 corners + 4 midpoints (each edge)
-//   General: corners first, then center if odd, then distribute remaining
-//            along edges evenly
+// Drawer anatomy:
+//   ┌────────────────────────────────────┐
+//   │          FACE (applied)            │  ← wider than box, overlays cabinet
+//   ├────────────────────────────────────┤
+//   │ side │                      │ side │  ← box sides
+//   │      │       interior       │      │
+//   │      │                      │      │
+//   │      ├──────────────────────┤      │
+//   │      │     bottom panel     │      │  ← in dado at bottom of sides
+//   └──────┴──────────────────────┴──────┘
+//           │◀── box front/back ──▶│
 //
-//  ┌──────────────────────────────┐
-//  │   margin                     │
-//  │   ┌──────────────────────┐   │
-//  │   │ ●                  ● │   │  ← corners
-//  │   │                      │   │
-//  │   │          ●           │   │  ← center (odd count)
-//  │   │                      │   │
-//  │   │ ●                  ● │   │  ← corners
-//  │   └──────────────────────┘   │
-//  │                              │
-//  └──────────────────────────────┘
+// Construction types affect how front/back/sides join:
+//   dado:         sides have dados, front/back slide in
+//   box_joint:    interlocking fingers at all corners
+//   butt:         sides butt against front/back, screwed
+//   dovetail:     angled interlocking joints
+//   pocket_screw: hidden pocket screws
 //
-function computeLegPositions(count, panelW, panelD, margin) {
-  if (count <= 0) return [];
+function computeDrawers(cfg, drawers, parts, dados, drills, code, dims) {
+  const {intW, depth, bpt, mt, caseH, bottomPos,
+    drawerSideT, drawerBottomT, drawerSlideClear, drawerSlideType,
+    drawerConstruct, drawerFaceType, drawerBtmDadoH, drawerBtmDadoD,
+    drawerGap, doorOverlay, doorReveal, dadoAllowance, dmt} = dims;
 
-  const x1 = margin;               // left
-  const x2 = panelW - margin;      // right
-  const y1 = margin;               // front
-  const y2 = panelD - margin;      // rear
-  const cx = (x1 + x2) / 2;       // center X
-  const cy = (y1 + y2) / 2;       // center Y
+  // Box width = cabinet internal width - 2×slide clearance
+  const boxW = intW - 2*drawerSlideClear;
+  // Box depth = cabinet depth - back panel - some clearance
+  const boxD = depth - bpt - 20; // 20mm clearance from back
 
-  if (count === 1) return [{x:cx, y:cy}];
-  if (count === 2) return [{x:cx, y:y1}, {x:cx, y:y2}];
-  if (count === 3) return [{x:x1, y:cy}, {x:cx, y:cy}, {x:x2, y:cy}];
+  // Face width depends on face type
+  const faceOverlay = doorOverlay || 12;
+  const faceW = intW + 2*mt + 2*faceOverlay - 2*(doorReveal||3);
 
-  const positions = [];
+  // Track vertical position from bottom of case
+  let yPos = 0; // from bottom panel top surface
 
-  // Always start with 4 corners
-  positions.push({x:x1, y:y1});  // front-left
-  positions.push({x:x2, y:y1});  // front-right
-  positions.push({x:x2, y:y2});  // rear-right
-  positions.push({x:x1, y:y2});  // rear-left
+  for(let di=0; di<drawers.length; di++){
+    const d = drawers[di];
+    const boxH  = d.boxHeight || 100;
+    const faceH = d.faceHeight || (boxH + drawerGap + 10);
+    const idx   = di+1;
+    const prefix = 'Drawer '+idx;
 
-  let remaining = count - 4;
-  if (remaining <= 0) return positions;
+    // ─── Box dimensions based on construction ───
+    let sideLen, sideH, frontLen, frontH, backLen, backH;
 
-  // If odd remaining, add center first
-  if (remaining % 2 === 1) {
-    positions.push({x:cx, y:cy});
-    remaining--;
+    // Side: always full depth × box height
+    sideLen = boxD;
+    sideH = boxH;
+
+    switch(drawerConstruct){
+      case 'dado':
+        // Front/back are shorter by 2×dadoDepth (they sit in dados in sides)
+        frontLen = boxW - 2*drawerSideT + 2*(cfg.dadoDepth||10);
+        frontH = boxH;
+        backLen = frontLen;
+        backH = boxH;
+        break;
+      case 'box_joint':
+      case 'dovetail':
+        // Front/back = box width (fingers interlock)
+        frontLen = boxW;
+        frontH = boxH;
+        backLen = boxW;
+        backH = boxH;
+        break;
+      case 'butt':
+      case 'pocket_screw':
+      default:
+        // Front/back = box width - 2×side thickness
+        frontLen = boxW - 2*drawerSideT;
+        frontH = boxH;
+        backLen = frontLen;
+        backH = boxH;
+        break;
+    }
+
+    // Bottom panel: sits in dado near bottom of sides
+    const btmLen = boxW - 2*drawerSideT + 2*drawerBtmDadoD;
+    const btmW = boxD - drawerSideT + drawerBtmDadoD; // front to back
+
+    // ─── Generate parts ───
+
+    // Left side
+    const lsCode = code();
+    parts.push({code:lsCode, name:prefix+' Side L', partType:'drawer_side_left',
+      len:sideLen, w:sideH, t:drawerSideT, qty:1,
+      notes:drawerConstruct+' construction'});
+
+    // Right side
+    const rsCode = code();
+    parts.push({code:rsCode, name:prefix+' Side R', partType:'drawer_side_right',
+      len:sideLen, w:sideH, t:drawerSideT, qty:1,
+      notes:drawerConstruct+' construction'});
+
+    // Bottom dado in each side
+    for(const sc of [lsCode, rsCode]){
+      dados.push({partCode:sc, opType:'dado', cutW:drawerBottomT+dadoAllowance,
+        cutD:drawerBtmDadoD,
+        fromEdge:'bottom', dist:drawerBtmDadoH, cutLen:sideLen,
+        depthStart:0,
+        note:prefix+' bottom panel dado'});
+    }
+
+    // Front/back dados in sides (for dado construction)
+    if(drawerConstruct==='dado'){
+      for(const sc of [lsCode, rsCode]){
+        // Front dado — near the front end of the side
+        dados.push({partCode:sc, opType:'dado',
+          cutW:drawerSideT+dadoAllowance, cutD:cfg.dadoDepth||10,
+          fromEdge:'bottom', dist:0, cutLen:sideH,
+          depthStart:0,
+          dxfX:0, dxfY:0, dxfW:drawerSideT+dadoAllowance, dxfH:sideH,
+          note:prefix+' front dado in side'});
+        // Back dado — near the back end
+        dados.push({partCode:sc, opType:'dado',
+          cutW:drawerSideT+dadoAllowance, cutD:cfg.dadoDepth||10,
+          fromEdge:'bottom', dist:0, cutLen:sideH,
+          depthStart:sideLen-drawerSideT-dadoAllowance,
+          dxfX:sideLen-drawerSideT-dadoAllowance, dxfY:0,
+          dxfW:drawerSideT+dadoAllowance, dxfH:sideH,
+          note:prefix+' back dado in side'});
+      }
+    }
+
+    // Front piece
+    parts.push({code:code(), name:prefix+' Box Front', partType:'drawer_front',
+      len:frontLen, w:frontH, t:drawerSideT, qty:1,
+      notes:drawerConstruct+' — box front (not the face)'});
+
+    // Back piece
+    parts.push({code:code(), name:prefix+' Box Back', partType:'drawer_back',
+      len:backLen, w:backH, t:drawerSideT, qty:1,
+      notes:drawerConstruct});
+
+    // Bottom panel
+    parts.push({code:code(), name:prefix+' Bottom', partType:'drawer_bottom',
+      len:btmLen, w:btmW, t:drawerBottomT, qty:1,
+      notes:'In dado, '+drawerBtmDadoH+'mm from bottom edge'});
+
+    // ─── Face ───
+    if(drawerFaceType==='applied'){
+      // Separate face panel, screwed to box front
+      parts.push({code:code(), name:prefix+' Face', partType:'drawer_front',
+        len:faceW, w:faceH, t:dmt||18, qty:1,
+        notes:'Applied face. Full overlay '+faceOverlay+'mm.'});
+    } else if(drawerFaceType==='integrated'){
+      // Box front IS the face — wider than the box
+      // Already generated as Box Front, but note it's oversized
+      // Actually we need to replace the front dimensions
+      const lastFront = parts.find(p=>p.name===prefix+' Box Front');
+      if(lastFront){
+        lastFront.len = faceW;
+        lastFront.w = faceH;
+        lastFront.notes = 'Integrated face — wider than box, overlays cabinet. '+drawerConstruct;
+      }
+    }
+    // Inset: face same size as opening, no overlay
+
+    yPos += faceH + drawerGap;
   }
+}
 
-  if (remaining <= 0) return positions;
 
-  // Distribute remaining along edges
-  // Prefer long edges first, then short edges
-  const longEdge = panelW >= panelD;
-  const edgePairs = longEdge
-    ? [
-        // Along front and rear (X axis, longer)
-        {from:{x:x1,y:y1}, to:{x:x2,y:y1}, fromR:{x:x1,y:y2}, toR:{x:x2,y:y2}},
-        // Along left and right (Y axis, shorter)
-        {from:{x:x1,y:y1}, to:{x:x1,y:y2}, fromR:{x:x2,y:y1}, toR:{x:x2,y:y2}},
-      ]
-    : [
-        {from:{x:x1,y:y1}, to:{x:x1,y:y2}, fromR:{x:x2,y:y1}, toR:{x:x2,y:y2}},
-        {from:{x:x1,y:y1}, to:{x:x2,y:y1}, fromR:{x:x1,y:y2}, toR:{x:x2,y:y2}},
-      ];
-
-  for (const pair of edgePairs) {
-    if (remaining <= 0) break;
-    // Add midpoints along each edge pair (always in pairs: one per edge)
-    const perEdge = Math.min(Math.floor(remaining / 2), 3); // max 3 midpoints per edge
-    for (let i = 1; i <= perEdge; i++) {
-      const t = i / (perEdge + 1);
-      // Front/left edge
-      positions.push({
-        x: pair.from.x + (pair.to.x - pair.from.x) * t,
-        y: pair.from.y + (pair.to.y - pair.from.y) * t
-      });
-      // Rear/right edge (mirror)
-      positions.push({
-        x: pair.fromR.x + (pair.toR.x - pair.fromR.x) * t,
-        y: pair.fromR.y + (pair.toR.y - pair.fromR.y) * t
-      });
-      remaining -= 2;
+// ═══════════════════════════════════════════════════════════════════════════
+// LEG PLACEMENT
+// ═══════════════════════════════════════════════════════════════════════════
+function computeLegPositions(count, panelW, panelD, margin) {
+  if(count<=0) return [];
+  const x1=margin,x2=panelW-margin,y1=margin,y2=panelD-margin;
+  const cx=(x1+x2)/2,cy=(y1+y2)/2;
+  if(count===1) return [{x:cx,y:cy}];
+  if(count===2) return [{x:cx,y:y1},{x:cx,y:y2}];
+  if(count===3) return [{x:x1,y:cy},{x:cx,y:cy},{x:x2,y:cy}];
+  const positions=[{x:x1,y:y1},{x:x2,y:y1},{x:x2,y:y2},{x:x1,y:y2}];
+  let remaining=count-4;
+  if(remaining<=0) return positions;
+  if(remaining%2===1){positions.push({x:cx,y:cy});remaining--;}
+  if(remaining<=0) return positions;
+  const longEdge=panelW>=panelD;
+  const edgePairs=longEdge
+    ?[{from:{x:x1,y:y1},to:{x:x2,y:y1},fromR:{x:x1,y:y2},toR:{x:x2,y:y2}},
+      {from:{x:x1,y:y1},to:{x:x1,y:y2},fromR:{x:x2,y:y1},toR:{x:x2,y:y2}}]
+    :[{from:{x:x1,y:y1},to:{x:x1,y:y2},fromR:{x:x2,y:y1},toR:{x:x2,y:y2}},
+      {from:{x:x1,y:y1},to:{x:x2,y:y1},fromR:{x:x1,y:y2},toR:{x:x2,y:y2}}];
+  for(const pair of edgePairs){
+    if(remaining<=0) break;
+    const perEdge=Math.min(Math.floor(remaining/2),3);
+    for(let i=1;i<=perEdge;i++){
+      const t=i/(perEdge+1);
+      positions.push({x:pair.from.x+(pair.to.x-pair.from.x)*t, y:pair.from.y+(pair.to.y-pair.from.y)*t});
+      positions.push({x:pair.fromR.x+(pair.toR.x-pair.fromR.x)*t, y:pair.fromR.y+(pair.toR.y-pair.fromR.y)*t});
+      remaining-=2;
     }
   }
-
   return positions;
 }
 
@@ -383,18 +469,15 @@ function computeLegPositions(count, panelW, panelD, margin) {
 // ═══════════════════════════════════════════════════════════════════════════
 // DOOR HELPERS
 // ═══════════════════════════════════════════════════════════════════════════
-
 function addHinges(drills,partCode,dH,dia,dep,fromEdge){
-  drills.push({partCode:partCode,opType:'hinge_bore',
-    dia:dia,dep:dep,
+  drills.push({partCode,opType:'hinge_bore',dia,dep,
     heightStart:80, spacing:dH-160, count:2,
     depthPositions:[fromEdge],
-    note:'35mm Forstner, '+fromEdge+'mm from hinge edge'});
+    note:'35mm Forstner, '+fromEdge+'mm from edge'});
 }
 
 function addDoorRS(parts,drills,code,style,dH,dW,dmt,hingeDia,hingeDep,hingeEdge,label,styleName){
-  const t=10;
-  const railLen=dW-2*style.stile+2*t;
+  const t=10, railLen=dW-2*style.stile+2*t;
   parts.push({code:code(),name:label+' Top Rail',partType:'rail',
     len:railLen,w:style.rail,t:dmt,qty:1,notes:styleName+' R&S'});
   parts.push({code:code(),name:label+' Bottom Rail',partType:'rail',
