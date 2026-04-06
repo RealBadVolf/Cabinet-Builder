@@ -70,8 +70,10 @@ export function computeCabinet(cfg) {
   const code=()=>'P'+String(++pIdx).padStart(3,'0');
 
   // ═══ SIDE PANELS ═══
+  const sidePanelCodes = [];
   for(const side of ['L','R']){
     const sc=code();
+    sidePanelCodes.push(sc);
     const isR=(side==='R');
     parts.push({code:sc,name:'Side Panel ('+side+')',
       partType:isR?'side_right':'side_left',
@@ -215,10 +217,11 @@ export function computeCabinet(cfg) {
   // ═══ DRAWERS ═══
   if(drawers.length>0){
     computeDrawers(cfg, drawers, parts, dados, drills, code, {
-      intW, depth, bpt, mt, caseH, bottomPos,
+      intW, depth, bpt, mt, caseH, bottomPos, sideH,
       drawerSideT, drawerBottomT, drawerSlideClear, drawerSlideType,
       drawerConstruct, drawerFaceType, drawerBtmDadoH, drawerBtmDadoD,
-      drawerGap, doorOverlay, doorReveal, dadoAllowance, dmt
+      drawerGap, doorOverlay, doorReveal, dadoAllowance, dmt,
+      sidePanelCodes
     });
   }
 
@@ -286,10 +289,11 @@ function getShelfPositions(count, caseH, mt, customPositions) {
 //   pocket_screw: hidden pocket screws
 //
 function computeDrawers(cfg, drawers, parts, dados, drills, code, dims) {
-  const {intW, depth, bpt, mt, caseH, bottomPos,
+  const {intW, depth, bpt, mt, caseH, bottomPos, sideH,
     drawerSideT, drawerBottomT, drawerSlideClear, drawerSlideType,
     drawerConstruct, drawerFaceType, drawerBtmDadoH, drawerBtmDadoD,
-    drawerGap, doorOverlay, doorReveal, dadoAllowance, dmt} = dims;
+    drawerGap, doorOverlay, doorReveal, dadoAllowance, dmt,
+    sidePanelCodes} = dims;
 
   // Box joint config
   const fingerWidth = cfg.boxJointFingerWidth || 20;   // mm — must accommodate bit radius
@@ -299,6 +303,9 @@ function computeDrawers(cfg, drawers, parts, dados, drills, code, dims) {
   const boxD = depth - bpt - 20;
   const faceOverlay = doorOverlay || 12;
   const faceW = intW + 2*mt + 2*faceOverlay - 2*(doorReveal||3);
+
+  // Track vertical position of each drawer in the cabinet (from top of bottom panel)
+  let drawerStackPos = 0;
 
   for(let di=0; di<drawers.length; di++){
     const d = drawers[di];
@@ -496,6 +503,32 @@ function computeDrawers(cfg, drawers, parts, dados, drills, code, dims) {
           note:prefix+' side-mount slide holes'});
       }
     }
+
+    // ═══ CABINET-SIDE SLIDE HOLES ═══
+    // Holes on the cabinet side panels where the slide rail mounts
+    if(drawerSlideType==='side_mount' && sidePanelCodes && sidePanelCodes.length>=2){
+      // Slide rail center on cabinet side = bottomPos + mt + drawerStackPos + boxH/2
+      const slideCenterOnSide = bottomPos + mt + drawerStackPos + boxH / 2;
+      const shCount = 4;
+      const shMargin = 30;
+      const slideDepthRange = depth - bpt - 2*shMargin;
+      const shSpacing = slideDepthRange / (shCount - 1);
+
+      for(const spc of sidePanelCodes){
+        const holes = [];
+        for(let h=0; h<shCount; h++){
+          holes.push({x: slideCenterOnSide, y: shMargin + h*shSpacing});
+        }
+        drills.push({partCode:spc, opType:'slide_mount',
+          dia:cfg.slideHoleDia||4, dep:cfg.slideHoleDepth||10,
+          holes, heightStart:slideCenterOnSide, spacing:shSpacing, count:shCount,
+          depthPositions:[shMargin],
+          note:'Cabinet slide holes for '+prefix+' at height '+Math.round(slideCenterOnSide)+'mm'});
+      }
+    }
+
+    // Update stack position for next drawer
+    drawerStackPos += faceH + drawerGap;
 
     // ═══ FACE ═══
     if(drawerFaceType==='applied'){
