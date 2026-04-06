@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// Cabinet computation engine v3 — All mm
-// DXF: X = part length (height for sides), Y = part width (depth for sides)
-// Export.js handles mirroring via part.mirror flag
+// Cabinet computation engine v4 — All mm
+// New: dado allowance, adjustable leg hole patterns
+// DXF: X = part length, Y = part width
 // ═══════════════════════════════════════════════════════════════════════════
 
 const DOOR_STYLES = {
@@ -28,6 +28,24 @@ export function computeCabinet(cfg) {
   const hingeBoreDia=cfg.hingeBoreDia||35, hingeBoreDepth=cfg.hingeBoreDepth||13;
   const hingeBoreFromEdge=cfg.hingeBoreFromEdge||22;
 
+  // ─── NEW: Dado allowance ──────────────────────────────────────────────
+  // Added to every dado width so parts fit snugly without being too tight.
+  // Typical: 0.2mm for plywood. Set to 0 for perfect-thickness material.
+  const dadoAllowance = cfg.dadoAllowance ?? 0.2;
+
+  // ─── NEW: Leg configuration ───────────────────────────────────────────
+  const legCount      = cfg.legCount || 0;            // 0 = no legs
+  const legMargin     = cfg.legMargin || 100;         // mm from panel edges to leg center
+  const legHoleCount  = cfg.legHoleCount || 4;        // screw holes per leg
+  const legHoleDia    = cfg.legHoleDia || 4;          // screw hole diameter
+  const legBoltCircle = cfg.legBoltCircle || 45;      // bolt circle diameter
+  const legHoleDepth  = cfg.legHoleDepth || 12;       // hole depth
+  const legCenterHole = cfg.legCenterHole || false;    // center pilot hole
+  const legCenterDia  = cfg.legCenterDia || 5;        // center hole diameter
+
+  // Effective dado width = material thickness + allowance
+  const dadoW = mt + dadoAllowance;
+
   const integratedTK=(toeKickStyle==='integral');
   const sideH=integratedTK?height:(height-tkH);
   const caseH=height-tkH;
@@ -40,7 +58,6 @@ export function computeCabinet(cfg) {
   const code=()=>'P'+String(++pIdx).padStart(3,'0');
 
   // ═══ SIDE PANELS ═══
-  // Left: normal. Right: mirror flag set, export flips Y coords.
   for (const side of ['L','R']) {
     const sc=code();
     const isR=(side==='R');
@@ -48,31 +65,32 @@ export function computeCabinet(cfg) {
       name:'Side Panel ('+side+')',
       partType:isR?'side_right':'side_left',
       len:sideH, w:depth, t:mt, qty:1,
-      notes:integratedTK?'Full height. Notch '+tkH+'x'+tkRecess+'mm.'+(isR?' MIRRORED.':''):'See ops.',
+      notes:integratedTK
+        ? 'Full height. Notch '+tkH+'x'+tkRecess+'mm.'+(isR?' MIRRORED.':'')
+        + (dadoAllowance>0?' Dado allowance: +'+dadoAllowance+'mm.':'')
+        : 'See ops.',
       hasNotch:integratedTK, notchH:tkH, notchD:tkRecess,
       mirror:isR});
 
-    // Bottom panel dado
-    // fromEdge:'bottom' = X position from bottom. depthStart = where along Y.
-    // Runs from front (Y=0) across depth, stopped before back panel.
-    dados.push({partCode:sc, opType:'dado', cutW:mt, cutD:dadoD,
+    // Bottom panel dado (uses dadoW = mt + allowance)
+    dados.push({partCode:sc, opType:'dado', cutW:dadoW, cutD:dadoD,
       fromEdge:'bottom', dist:bottomPos, cutLen:depth-bpt,
       depthStart:0,
-      note:'Bottom panel dado'});
+      note:'Bottom panel dado ('+dadoW+'mm wide, incl. '+dadoAllowance+'mm allowance)'});
 
-    // Front nailer dado at top, starting from front edge (Y=0)
-    dados.push({partCode:sc, opType:'dado', cutW:mt, cutD:dadoD,
+    // Front nailer dado
+    dados.push({partCode:sc, opType:'dado', cutW:dadoW, cutD:dadoD,
       fromEdge:'top', dist:0, cutLen:nailerH,
       depthStart:0,
       note:'Front nailer dado'});
 
-    // Rear nailer dado at top, starting from rear edge (Y=depth-nailerH)
-    dados.push({partCode:sc, opType:'dado', cutW:mt, cutD:dadoD,
+    // Rear nailer dado
+    dados.push({partCode:sc, opType:'dado', cutW:dadoW, cutD:dadoD,
       fromEdge:'top', dist:0, cutLen:nailerH,
       depthStart:depth-nailerH,
       note:'Rear nailer dado'});
 
-    // Back panel rabbet along rear edge, from top down for rabbetLen
+    // Back panel rabbet (rabbet width = bpt + 1, no allowance needed)
     const rabbetLen=integratedTK?(sideH-tkH):sideH;
     dados.push({partCode:sc, opType:'rabbet', cutW:bpt+1, cutD:rabD,
       fromEdge:'rear', dist:0, cutLen:rabbetLen,
@@ -82,10 +100,10 @@ export function computeCabinet(cfg) {
     if(shelfType==='fixed'&&shelfCount>0){
       const intCaseH=caseH-2*mt, sp=intCaseH/(shelfCount+1);
       for(let i=1;i<=shelfCount;i++){
-        dados.push({partCode:sc, opType:'dado', cutW:mt, cutD:dadoD,
+        dados.push({partCode:sc, opType:'dado', cutW:dadoW, cutD:dadoD,
           fromEdge:'bottom', dist:bottomPos+mt+sp*i, cutLen:depth-bpt,
           depthStart:0,
-          note:'Fixed shelf #'+i});
+          note:'Fixed shelf #'+i+' ('+dadoW+'mm wide)'});
       }
     }
 
@@ -94,7 +112,6 @@ export function computeCabinet(cfg) {
       const zStart=bottomPos+mt+pinZoneStart;
       const zEnd=sideH-mt-pinZoneEnd;
       const hCount=Math.max(1,Math.floor((zEnd-zStart)/pinSpacing)+1);
-      // depthPositions: Y coords for pin rows (export mirrors these for right side)
       const depthPos=[pinInsetF];
       if(pinRowsPerSide>=2) depthPos.push(depth-bpt-pinInsetR);
       if(pinRowsPerSide>2){
@@ -112,8 +129,53 @@ export function computeCabinet(cfg) {
 
   // ═══ BOTTOM PANEL ═══
   const btmW=intW+2*dadoD, btmD=depth-bpt-mt+dadoD;
-  parts.push({code:code(),name:'Bottom Panel',partType:'bottom',
-    len:btmW,w:btmD,t:mt,qty:1,notes:'Into side dados. Front flush.'});
+  const btmCode=code();
+  parts.push({code:btmCode,name:'Bottom Panel',partType:'bottom',
+    len:btmW,w:btmD,t:mt,qty:1,
+    notes:'Into side dados. Front flush.'
+      +(legCount>0?' Leg mounting holes on underside.':'')});
+
+  // ═══ LEG MOUNTING HOLES ═══
+  if(legCount>0){
+    // Calculate leg center positions on the bottom panel
+    const legPositions = computeLegPositions(legCount, btmW, btmD, legMargin);
+
+    // For each leg, generate bolt circle holes
+    const allHoles = [];
+    for(const pos of legPositions){
+      // Bolt circle: N holes evenly spaced on a circle
+      const boltR = legBoltCircle / 2;
+      for(let h=0; h<legHoleCount; h++){
+        const angle = (2 * Math.PI * h) / legHoleCount - Math.PI/2; // start from top
+        allHoles.push({
+          x: pos.x + boltR * Math.cos(angle),
+          y: pos.y + boltR * Math.sin(angle)
+        });
+      }
+      // Optional center pilot hole
+      if(legCenterHole){
+        allHoles.push({x:pos.x, y:pos.y, isCenterHole:true});
+      }
+    }
+
+    // Screw holes
+    drills.push({partCode:btmCode, opType:'leg_mount',
+      dia:legHoleDia, dep:legHoleDepth,
+      holes:allHoles.filter(h=>!h.isCenterHole),
+      heightStart:0, spacing:0, count:allHoles.filter(h=>!h.isCenterHole).length,
+      depthPositions:[0],
+      note:legCount+' legs, '+legHoleCount+' holes each ('+legHoleDia+'mm), bolt circle '+legBoltCircle+'mm, margin '+legMargin+'mm'});
+
+    // Center pilot holes (separate operation, may be different diameter)
+    if(legCenterHole){
+      drills.push({partCode:btmCode, opType:'leg_center',
+        dia:legCenterDia, dep:legHoleDepth,
+        holes:allHoles.filter(h=>h.isCenterHole),
+        heightStart:0, spacing:0, count:legPositions.length,
+        depthPositions:[0],
+        note:legCount+' center pilot holes ('+legCenterDia+'mm)'});
+    }
+  }
 
   // ═══ SHELVES ═══
   if(shelfCount>0){
@@ -138,7 +200,7 @@ export function computeCabinet(cfg) {
     len:backW,w:backH,t:bpt,qty:1,notes:'In rabbet. Glue + pin nail.'});
 
   // ═══ TOE KICK ═══
-  if(toeKickStyle!=='none')
+  if(toeKickStyle!=='none'&&toeKickStyle!=='legs')
     parts.push({code:code(),name:'Toe Kick Plate',partType:'toe_kick',
       len:intW,w:tkH-mt,t:mt,qty:1,notes:'Recessed '+tkRecess+'mm.'});
 
@@ -174,6 +236,108 @@ export function computeCabinet(cfg) {
   return {parts,dados,drills,caseH,intW,sideH};
 }
 
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LEG PLACEMENT — distributes N legs within a margin rectangle
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Strategy:
+//   4 legs → 4 corners
+//   5 legs → 4 corners + 1 center
+//   6 legs → 4 corners + 2 midpoints on long edges
+//   7 legs → 4 corners + 1 center + 2 midpoints on long edges
+//   8 legs → 4 corners + 4 midpoints (each edge)
+//   General: corners first, then center if odd, then distribute remaining
+//            along edges evenly
+//
+//  ┌──────────────────────────────┐
+//  │   margin                     │
+//  │   ┌──────────────────────┐   │
+//  │   │ ●                  ● │   │  ← corners
+//  │   │                      │   │
+//  │   │          ●           │   │  ← center (odd count)
+//  │   │                      │   │
+//  │   │ ●                  ● │   │  ← corners
+//  │   └──────────────────────┘   │
+//  │                              │
+//  └──────────────────────────────┘
+//
+function computeLegPositions(count, panelW, panelD, margin) {
+  if (count <= 0) return [];
+
+  const x1 = margin;               // left
+  const x2 = panelW - margin;      // right
+  const y1 = margin;               // front
+  const y2 = panelD - margin;      // rear
+  const cx = (x1 + x2) / 2;       // center X
+  const cy = (y1 + y2) / 2;       // center Y
+
+  if (count === 1) return [{x:cx, y:cy}];
+  if (count === 2) return [{x:cx, y:y1}, {x:cx, y:y2}];
+  if (count === 3) return [{x:x1, y:cy}, {x:cx, y:cy}, {x:x2, y:cy}];
+
+  const positions = [];
+
+  // Always start with 4 corners
+  positions.push({x:x1, y:y1});  // front-left
+  positions.push({x:x2, y:y1});  // front-right
+  positions.push({x:x2, y:y2});  // rear-right
+  positions.push({x:x1, y:y2});  // rear-left
+
+  let remaining = count - 4;
+  if (remaining <= 0) return positions;
+
+  // If odd remaining, add center first
+  if (remaining % 2 === 1) {
+    positions.push({x:cx, y:cy});
+    remaining--;
+  }
+
+  if (remaining <= 0) return positions;
+
+  // Distribute remaining along edges
+  // Prefer long edges first, then short edges
+  const longEdge = panelW >= panelD;
+  const edgePairs = longEdge
+    ? [
+        // Along front and rear (X axis, longer)
+        {from:{x:x1,y:y1}, to:{x:x2,y:y1}, fromR:{x:x1,y:y2}, toR:{x:x2,y:y2}},
+        // Along left and right (Y axis, shorter)
+        {from:{x:x1,y:y1}, to:{x:x1,y:y2}, fromR:{x:x2,y:y1}, toR:{x:x2,y:y2}},
+      ]
+    : [
+        {from:{x:x1,y:y1}, to:{x:x1,y:y2}, fromR:{x:x2,y:y1}, toR:{x:x2,y:y2}},
+        {from:{x:x1,y:y1}, to:{x:x2,y:y1}, fromR:{x:x1,y:y2}, toR:{x:x2,y:y2}},
+      ];
+
+  for (const pair of edgePairs) {
+    if (remaining <= 0) break;
+    // Add midpoints along each edge pair (always in pairs: one per edge)
+    const perEdge = Math.min(Math.floor(remaining / 2), 3); // max 3 midpoints per edge
+    for (let i = 1; i <= perEdge; i++) {
+      const t = i / (perEdge + 1);
+      // Front/left edge
+      positions.push({
+        x: pair.from.x + (pair.to.x - pair.from.x) * t,
+        y: pair.from.y + (pair.to.y - pair.from.y) * t
+      });
+      // Rear/right edge (mirror)
+      positions.push({
+        x: pair.fromR.x + (pair.toR.x - pair.fromR.x) * t,
+        y: pair.fromR.y + (pair.toR.y - pair.fromR.y) * t
+      });
+      remaining -= 2;
+    }
+  }
+
+  return positions;
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DOOR HELPERS
+// ═══════════════════════════════════════════════════════════════════════════
+
 function addHinges(drills,partCode,dH,dia,dep,fromEdge){
   drills.push({partCode:partCode,opType:'hinge_bore',
     dia:dia,dep:dep,
@@ -185,22 +349,16 @@ function addHinges(drills,partCode,dH,dia,dep,fromEdge){
 function addDoorRS(parts,drills,code,style,dH,dW,dmt,hingeDia,hingeDep,hingeEdge,label,styleName){
   const t=10;
   const railLen=dW-2*style.stile+2*t;
-
-  // Top rail
   parts.push({code:code(),name:label+' Top Rail',partType:'rail',
     len:railLen,w:style.rail,t:dmt,qty:1,notes:styleName+' R&S'});
-  // Bottom rail
   parts.push({code:code(),name:label+' Bottom Rail',partType:'rail',
     len:railLen,w:style.rail,t:dmt,qty:1,notes:styleName+' R&S'});
-  // Hinge stile (gets hinge bores)
   const hsCode=code();
   parts.push({code:hsCode,name:label+' Hinge Stile',partType:'stile',
     len:dH,w:style.stile,t:dmt,qty:1,notes:styleName+' R&S — hinge side'});
   addHinges(drills,hsCode,dH,hingeDia,hingeDep,hingeEdge);
-  // Latch stile
   parts.push({code:code(),name:label+' Latch Stile',partType:'stile',
     len:dH,w:style.stile,t:dmt,qty:1,notes:styleName+' R&S — latch side'});
-  // Center panel
   parts.push({code:code(),name:label+' Center Panel',partType:'center_panel',
     len:dW-2*style.stile+2*t, w:dH-2*style.rail+2*t, t:dmt, qty:1,
     notes:'+'+t+'mm tongue each side'});

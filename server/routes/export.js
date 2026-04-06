@@ -241,26 +241,23 @@ function dxfText(x, y, text, layer, h) {
 }
 
 function generateDXF(parts, dadosByPart, drillsByPart, cfg) {
-  const layers = new Set(['Profile_Cut', 'Label', 'Dado', 'Rabbet', 'Drill', 'Hinge_Bore', 'Shelf_Pins']);
+  const layers = new Set(['Profile_Cut', 'Label', 'Dado', 'Rabbet', 'Drill', 'Hinge_Bore', 'Shelf_Pins', 'Leg_Mount']);
   let entities = '';
   let offsetX = 0;
   const GAP = 20;
 
   for (const part of parts) {
     for (let inst = 0; inst < part.qty; inst++) {
-      const W = part.len;   // X axis in DXF (height for sides)
-      const H = part.w;     // Y axis in DXF (depth for sides)
+      const W = part.len;
+      const H = part.w;
       const isMirror = !!part.mirror;
 
-      // Helper: mirror Y coordinate for right-side panels
-      // Flips Y so that operations land on the inside face
-      const my = (y, h) => isMirror ? (H - y - h) : y;
+      const my = (y, h) => isMirror ? (H - y - (h||0)) : y;
 
       // ─── Profile cut ───
       if (part.hasNotch && part.notchH > 0 && part.notchD > 0) {
         const nH = part.notchH, nD = part.notchD;
         if (!isMirror) {
-          // Left panel: notch at bottom-front (X=0, Y=0)
           entities += '0\nLWPOLYLINE\n8\nProfile_Cut\n90\n6\n70\n1\n' +
             '10\n'+(offsetX)+'\n20\n'+nD+'\n'+
             '10\n'+(offsetX+nH)+'\n20\n'+nD+'\n'+
@@ -269,7 +266,6 @@ function generateDXF(parts, dadosByPart, drillsByPart, cfg) {
             '10\n'+(offsetX+W)+'\n20\n'+H+'\n'+
             '10\n'+offsetX+'\n20\n'+H+'\n';
         } else {
-          // Right panel: notch at bottom-rear (X=0, Y=H-nD to Y=H)
           entities += '0\nLWPOLYLINE\n8\nProfile_Cut\n90\n6\n70\n1\n' +
             '10\n'+offsetX+'\n20\n0\n'+
             '10\n'+(offsetX+W)+'\n20\n0\n'+
@@ -289,35 +285,24 @@ function generateDXF(parts, dadosByPart, drillsByPart, cfg) {
       entities += dxfText(offsetX+5, H-18, W+' x '+H+' x '+part.t+'mm'+(isMirror?' [MIRROR]':''), 'Label', 3);
 
       // ─── Dados & Rabbets ───
-      // X axis = height of panel. Y axis = depth.
-      // 'bottom'/'top' = position along X (height). Dado runs along Y from depthStart.
-      // 'rear' = position along Y (depth). Dado runs along X from top.
       const partDados = dadosByPart[part.code] || [];
       for (const d of partDados) {
         const layer = d.opType === 'rabbet' ? 'Rabbet' : 'Dado';
         const dist = d.dist || 0;
         const cw = d.cutW;
         const cl = d.cutLen;
-        const ds = d.depthStart || 0;  // where along Y the dado starts
+        const ds = d.depthStart || 0;
 
         let rx, ry, rw, rh;
         switch (d.fromEdge) {
           case 'bottom':
-            // Height position from X=0. Dado runs cl along Y starting at depthStart.
-            rx = dist; ry = my(ds, cl); rw = cw; rh = cl;
-            break;
+            rx = dist; ry = my(ds, cl); rw = cw; rh = cl; break;
           case 'top':
-            // Height position from X=W. Dado runs cl along Y starting at depthStart.
-            rx = W - dist - cw; ry = my(ds, cl); rw = cw; rh = cl;
-            break;
+            rx = W - dist - cw; ry = my(ds, cl); rw = cw; rh = cl; break;
           case 'rear':
-            // Depth position from Y=H. Dado runs cl along X.
-            // Rabbet starts from X = W-cl (top of panel, down)
-            rx = W - cl; ry = my(H - dist - cw, cw); rw = cl; rh = cw;
-            break;
+            rx = W - cl; ry = my(H - dist - cw, cw); rw = cl; rh = cw; break;
           case 'front':
-            rx = 0; ry = my(dist, cw); rw = cl; rh = cw;
-            break;
+            rx = 0; ry = my(dist, cw); rw = cl; rh = cw; break;
           default:
             rx = 0; ry = 0; rw = cl; rh = cw;
         }
@@ -325,18 +310,31 @@ function generateDXF(parts, dadosByPart, drillsByPart, cfg) {
       }
 
       // ─── Drill operations ───
-      // New format: heightStart, spacing, count, depthPositions[]
       const partDrills = drillsByPart[part.code] || [];
       for (const d of partDrills) {
-        const layer = d.opType === 'hinge_bore' ? 'Hinge_Bore' : 'Shelf_Pins';
-        const r = d.dia / 2;
-        const depthPos = d.depthPositions || [0];
+        // Choose layer based on operation type
+        let layer = 'Drill';
+        if (d.opType === 'hinge_bore') layer = 'Hinge_Bore';
+        else if (d.opType === 'shelf_pin_line') layer = 'Shelf_Pins';
+        else if (d.opType === 'leg_mount' || d.opType === 'leg_center') layer = 'Leg_Mount';
 
-        for (const yPos of depthPos) {
-          for (let i = 0; i < (d.count || 1); i++) {
-            const cx = (d.heightStart || 0) + i * (d.spacing || 0);
-            const cy = isMirror ? (H - yPos) : yPos;
-            entities += dxfCircle(offsetX + cx, cy, r, layer);
+        const r = d.dia / 2;
+
+        // Method 1: Explicit holes array (legs, hinges when computed with holes[])
+        if (d.holes && d.holes.length > 0) {
+          for (const hole of d.holes) {
+            entities += dxfCircle(offsetX + hole.x, hole.y, r, layer);
+          }
+        }
+        // Method 2: Grid pattern (shelf pins)
+        else {
+          const depthPos = d.depthPositions || [0];
+          for (const yPos of depthPos) {
+            for (let i = 0; i < (d.count || 1); i++) {
+              const cx = (d.heightStart || 0) + i * (d.spacing || 0);
+              const cy = isMirror ? (H - yPos) : yPos;
+              entities += dxfCircle(offsetX + cx, cy, r, layer);
+            }
           }
         }
       }
