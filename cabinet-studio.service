@@ -1,0 +1,22 @@
+[Unit]
+Description=Cabinet Studio API
+After=network.target mariadb.service
+Wants=mariadb.service
+
+[Service]
+Type=simple
+WorkingDirectory=/Dockers/cabinet-studio/server
+ExecStart=/usr/bin/node index.js
+Restart=on-failure
+RestartSec=5
+Environment=NODE_ENV=production
+EnvironmentFile=/Dockers/cabinet-studio/.env
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/Dockers/cabinet-studio
+
+[Install]
+WantedBy=multi-user.target
+

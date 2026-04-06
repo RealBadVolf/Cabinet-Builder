@@ -1,0 +1,76 @@
+version: '3.8'
+
+services:
+  db:
+    image: mariadb:11
+    restart: always
+    environment:
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASS:-rootpass}
+      MARIADB_DATABASE: cabinet_studio
+      MARIADB_USER: ${DB_USER:-cabinet}
+      MARIADB_PASSWORD: ${DB_PASS:-cabinet}
+    ports:
+      - "3306:3306"
+    volumes:
+      - db_data:/var/lib/mysql
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PORT: 3001
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_USER: ${DB_USER:-cabinet}
+      DB_PASS: ${DB_PASS:-cabinet}
+      DB_NAME: cabinet_studio
+      JWT_SECRET: ${JWT_SECRET:-change-this-to-a-long-random-string}
+      CORS_ORIGIN: https://cab.badvolf.ru
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./server:/app
+      - /app/node_modules
+
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    restart: always
+    depends_on:
+      - server
+    volumes:
+      - client_dist:/app/dist
+
+  nginx:
+    image: nginx:alpine
+    restart: always
+    depends_on:
+      - server
+      - client
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
+      - client_dist:/var/www/html
+      - ./nginx/certs:/etc/nginx/certs  # Mount your SSL certs here
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "http://localhost/api/health"]
+      interval: 30s
+      timeout: 5s
+
+volumes:
+  db_data:
+  client_dist:
