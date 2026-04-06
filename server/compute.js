@@ -181,11 +181,57 @@ export function computeCabinet(cfg) {
   if(shelfCount>0){
     const shW=shelfType==='fixed'?intW+2*dadoD:intW-1;
     const shD=shelfType==='fixed'?depth-bpt-mt+dadoD:depth-bpt-6;
-    parts.push({code:code(),
-      name:shelfType==='fixed'?'Fixed Shelf':'Adjustable Shelf',
-      partType:shelfType==='fixed'?'fixed_shelf':'adjustable_shelf',
-      len:shW,w:shD,t:mt,qty:shelfCount,
-      notes:shelfType==='fixed'?'In dado':'On pins, -1mm clearance'});
+
+    // Shelf pin groove config (for adjustable shelves)
+    const shelfGrooves   = (cfg.shelfGrooves !== false) && (shelfType==='adjustable');
+    const grooveWidth    = cfg.shelfGrooveWidth || (pinDia + 2);  // pin dia + 2mm clearance
+    const grooveDepth    = cfg.shelfGrooveDepth || 10;            // = pin extension from panel
+    const grooveInset    = cfg.shelfGrooveInset || 12;            // how far from edge inward
+
+    // Compute pin depth positions (same as pin drilling rows)
+    const pinDepthPos = [pinInsetF];
+    if(pinRowsPerSide>=2) pinDepthPos.push(depth-bpt-pinInsetR);
+    if(pinRowsPerSide>2){
+      const total=depth-bpt-pinInsetF-pinInsetR;
+      for(let r=1;r<pinRowsPerSide-1;r++)
+        pinDepthPos.push(pinInsetF+r*(total/(pinRowsPerSide-1)));
+    }
+
+    // Generate each shelf as its own part (so each gets its own grooves in DXF)
+    for(let si=0; si<shelfCount; si++){
+      const shCode = code();
+      const shelfLabel = shelfCount>1 ? 'Shelf '+(si+1) : 'Adjustable Shelf';
+      parts.push({code:shCode,
+        name:shelfType==='fixed'?'Fixed Shelf':shelfLabel,
+        partType:shelfType==='fixed'?'fixed_shelf':'adjustable_shelf',
+        len:shW,w:shD,t:mt,qty:1,
+        notes:shelfType==='fixed'?'In dado'
+          :'On pins'+(shelfGrooves?', with pin-lock grooves ('+pinDepthPos.length+' per side)':'')});
+
+      // Add pin-lock grooves to adjustable shelves
+      if(shelfGrooves){
+        // Grooves on LEFT edge (X=0) — for left side panel pins
+        for(const pinY of pinDepthPos){
+          const grooveY = pinY - grooveWidth/2;
+          dados.push({partCode:shCode, opType:'dado',
+            cutW:grooveInset, cutD:grooveDepth,
+            fromEdge:'bottom', dist:0, cutLen:grooveWidth,
+            depthStart:grooveY,
+            dxfX:0, dxfY:grooveY, dxfW:grooveInset, dxfH:grooveWidth,
+            note:'Pin-lock groove, left edge, Y='+Math.round(pinY)+'mm'});
+        }
+        // Grooves on RIGHT edge (X=shW) — for right side panel pins
+        for(const pinY of pinDepthPos){
+          const grooveY = pinY - grooveWidth/2;
+          dados.push({partCode:shCode, opType:'dado',
+            cutW:grooveInset, cutD:grooveDepth,
+            fromEdge:'top', dist:0, cutLen:grooveWidth,
+            depthStart:grooveY,
+            dxfX:shW-grooveInset, dxfY:grooveY, dxfW:grooveInset, dxfH:grooveWidth,
+            note:'Pin-lock groove, right edge, Y='+Math.round(pinY)+'mm'});
+        }
+      }
+    }
   }
 
   // ═══ NAILERS ═══

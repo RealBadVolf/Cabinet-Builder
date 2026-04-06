@@ -32,6 +32,7 @@ const DEFAULT_CONFIG = {
   handleType:'pull', handleLength:128,
   legCount:0, legMargin:100, legHoleCount:4, legHoleDia:4,
   legBoltCircle:45, legHoleDepth:12, legCenterHole:false, legCenterDia:5,
+  shelfGrooves:true, shelfGrooveWidth:10, shelfGrooveDepth:10, shelfGrooveInset:12,
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -473,6 +474,18 @@ export default function CabinetStudio({ cabinetId, user, api }) {
                 <Num label="Inset rear" value={cfg.pinInsetRear} onChange={v=>u('pinInsetRear',v)} min={20} max={100}/>
                 <Num label="Zone start↑" value={cfg.pinZoneStart} onChange={v=>u('pinZoneStart',v)} min={30} max={200} step={5}/>
                 <Num label="Zone end↓" value={cfg.pinZoneEnd} onChange={v=>u('pinZoneEnd',v)} min={30} max={200} step={5}/>
+                <div className="cs-sec">Pin-Lock Grooves</div>
+                <Sel label="Enabled" value={cfg.shelfGrooves===false?'no':'yes'} onChange={v=>u('shelfGrooves',v==='yes')}
+                  options={[['yes','Yes — grooves on shelves'],['no','No — plain shelves']]}/>
+                {cfg.shelfGrooves!==false&&<>
+                  <Num label="Groove width" value={cfg.shelfGrooveWidth||(cfg.pinDia+2)} onChange={v=>u('shelfGrooveWidth',v)} min={4} max={20} step={.5}/>
+                  <Num label="Groove depth" value={cfg.shelfGrooveDepth||10} onChange={v=>u('shelfGrooveDepth',v)} min={3} max={15} step={.5}/>
+                  <Num label="Edge inset" value={cfg.shelfGrooveInset||12} onChange={v=>u('shelfGrooveInset',v)} min={5} max={25} step={1}/>
+                  <div style={{marginTop:8,padding:'8px 10px',background:'#252119',borderRadius:4,fontSize:10,color:'#8a7e6a',lineHeight:1.6}}>
+                    Small dadoes on shelf underside lock onto pins so shelves can't slide. {cfg.pinRowsPerSide||2} grooves per side × 2 sides = {(cfg.pinRowsPerSide||2)*2} grooves per shelf.
+                    Groove: {cfg.shelfGrooveWidth||(cfg.pinDia+2)}mm wide × {cfg.shelfGrooveDepth||10}mm deep, {cfg.shelfGrooveInset||12}mm from edge.
+                  </div>
+                </>}
               </>}
             </>}
             {cfgSec==='doors'&&<>

@@ -288,23 +288,30 @@ function generateDXF(parts, dadosByPart, drillsByPart, cfg) {
       const partDados = dadosByPart[part.code] || [];
       for (const d of partDados) {
         const layer = d.opType === 'rabbet' ? 'Rabbet' : 'Dado';
-        const dist = d.dist || 0;
-        const cw = d.cutW;
-        const cl = d.cutLen;
-        const ds = d.depthStart || 0;
 
         let rx, ry, rw, rh;
-        switch (d.fromEdge) {
-          case 'bottom':
-            rx = dist; ry = my(ds, cl); rw = cw; rh = cl; break;
-          case 'top':
-            rx = W - dist - cw; ry = my(ds, cl); rw = cw; rh = cl; break;
-          case 'rear':
-            rx = W - cl; ry = my(H - dist - cw, cw); rw = cl; rh = cw; break;
-          case 'front':
-            rx = 0; ry = my(dist, cw); rw = cl; rh = cw; break;
-          default:
-            rx = 0; ry = 0; rw = cl; rh = cw;
+
+        // Prefer explicit DXF coordinates when available (shelf grooves, etc.)
+        if (d.dxfX !== undefined && d.dxfY !== undefined) {
+          rx = d.dxfX; ry = d.dxfY; rw = d.dxfW; rh = d.dxfH;
+        } else {
+          const dist = d.dist || 0;
+          const cw = d.cutW;
+          const cl = d.cutLen;
+          const ds = d.depthStart || 0;
+
+          switch (d.fromEdge) {
+            case 'bottom':
+              rx = dist; ry = my(ds, cl); rw = cw; rh = cl; break;
+            case 'top':
+              rx = W - dist - cw; ry = my(ds, cl); rw = cw; rh = cl; break;
+            case 'rear':
+              rx = W - cl; ry = my(H - dist - cw, cw); rw = cl; rh = cw; break;
+            case 'front':
+              rx = 0; ry = my(dist, cw); rw = cl; rh = cw; break;
+            default:
+              rx = 0; ry = 0; rw = cl; rh = cw;
+          }
         }
         entities += dxfRect(offsetX + rx, ry, rw, rh, layer);
       }
