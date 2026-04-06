@@ -398,8 +398,9 @@ function computeDrawers(cfg, drawers, parts, dados, drills, code, dims) {
       }
     }
 
-    // Front piece (may be wider/taller if integrated face)
+    // ═══ FRONT PIECE ═══
     let actualFrontLen = frontLen, actualFrontH = frontH;
+    const sideInset = (drawerFaceType==='integrated') ? (faceW - boxW) / 2 : 0;
     if(drawerFaceType==='integrated'){
       actualFrontLen = faceW;
       actualFrontH = faceH;
@@ -410,43 +411,62 @@ function computeDrawers(cfg, drawers, parts, dados, drills, code, dims) {
       notes:drawerConstruct+(drawerFaceType==='integrated'?' — integrated face':'')
         +(drawerConstruct==='box_joint'?' ('+fingerWidth+'mm fingers)':'')});
 
-    // Box joint pockets on front piece — "B" pattern (pockets at odd indices)
-    // Centered vertically on the ACTUAL piece height
+    // Bottom dado on front — at Y=drawerBtmDadoH, spanning interior width
+    {
+      const fdX = (drawerFaceType==='integrated') ? sideInset + drawerSideT : (drawerConstruct==='dado'?0:drawerSideT);
+      const fdW = (drawerFaceType==='integrated')
+        ? boxW - 2*drawerSideT
+        : (drawerConstruct==='dado' ? actualFrontLen : actualFrontLen - 2*drawerSideT);
+      dados.push({partCode:fCode, opType:'dado', cutW:btmDadoW, cutD:drawerBtmDadoD,
+        fromEdge:'bottom', dist:drawerBtmDadoH, cutLen:fdW, depthStart:0,
+        dxfX:fdX, dxfY:drawerBtmDadoH, dxfW:fdW, dxfH:btmDadoW,
+        note:prefix+' bottom dado in front'});
+    }
+
+    // Box joint on front — pockets at INSET positions where sides connect
     if(drawerConstruct==='box_joint'){
-      const numF = Math.floor(actualFrontH / fingerWidth);
+      const numF = Math.floor(sideH / fingerWidth);
       const usedH = numF * fingerWidth;
-      const offY = (actualFrontH - usedH) / 2;
+      const offY = (sideH - usedH) / 2;
+      const boxBtmOnFace = (drawerFaceType==='integrated') ? (actualFrontH - sideH) / 2 : 0;
 
       for(let f=0; f<numF; f++){
         if(f%2===1){
-          const fy = offY + f * fingerWidth;
-          // Left end
+          const fy = boxBtmOnFace + offY + f * fingerWidth;
           dados.push({partCode:fCode, opType:'groove',
             cutW:fingerWidth, cutD:drawerSideT,
             fromEdge:'front', dist:0, cutLen:fingerWidth, depthStart:0,
-            dxfX:0, dxfY:fy, dxfW:drawerSideT, dxfH:fingerWidth,
-            note:prefix+' box joint on front, left, finger '+f});
-          // Right end
+            dxfX:sideInset, dxfY:fy, dxfW:drawerSideT, dxfH:fingerWidth,
+            note:prefix+' box joint, front left connection'});
           dados.push({partCode:fCode, opType:'groove',
             cutW:fingerWidth, cutD:drawerSideT,
             fromEdge:'rear', dist:0, cutLen:fingerWidth, depthStart:0,
-            dxfX:actualFrontLen-drawerSideT, dxfY:fy, dxfW:drawerSideT, dxfH:fingerWidth,
-            note:prefix+' box joint on front, right, finger '+f});
+            dxfX:actualFrontLen - sideInset - drawerSideT, dxfY:fy, dxfW:drawerSideT, dxfH:fingerWidth,
+            note:prefix+' box joint, front right connection'});
         }
       }
     }
 
-    // Back piece
+    // ═══ BACK PIECE ═══
     const bCode = code();
     parts.push({code:bCode, name:prefix+' Box Back', partType:'drawer_back',
       len:backLen, w:backH, t:drawerSideT, qty:1, notes:drawerConstruct});
 
-    // Box joint pockets on back piece
+    // Bottom dado on back
+    {
+      const bdX = (drawerConstruct==='dado') ? 0 : drawerSideT;
+      const bdW = (drawerConstruct==='dado') ? backLen : backLen - 2*drawerSideT;
+      dados.push({partCode:bCode, opType:'dado', cutW:btmDadoW, cutD:drawerBtmDadoD,
+        fromEdge:'bottom', dist:drawerBtmDadoH, cutLen:bdW, depthStart:0,
+        dxfX:bdX, dxfY:drawerBtmDadoH, dxfW:bdW, dxfH:btmDadoW,
+        note:prefix+' bottom dado in back'});
+    }
+
+    // Box joint on back (at edges — back is box-width)
     if(drawerConstruct==='box_joint'){
       const numF = Math.floor(backH / fingerWidth);
       const usedH = numF * fingerWidth;
       const offY = (backH - usedH) / 2;
-
       for(let f=0; f<numF; f++){
         if(f%2===1){
           const fy = offY + f * fingerWidth;
@@ -455,14 +475,29 @@ function computeDrawers(cfg, drawers, parts, dados, drills, code, dims) {
       }
     }
 
-    // Bottom panel
+    // ═══ BOTTOM PANEL ═══
     parts.push({code:code(), name:prefix+' Bottom', partType:'drawer_bottom',
       len:btmLen, w:btmW, t:drawerBottomT, qty:1,
-      notes:'In dado, '+drawerBtmDadoH+'mm from bottom edge'});
+      notes:'In dado on all 4 sides, '+drawerBtmDadoH+'mm up'});
 
-    // ─── Face ───
-    // Integrated face: already handled above (Box Front created with face dimensions)
-    // Applied face: separate piece
+    // ═══ SLIDE MOUNTING HOLES ═══
+    if(drawerSlideType==='side_mount'){
+      const slideMountY = sideH / 2;
+      const shCount = 4;
+      const shMargin = 30;
+      const shSpacing = (sideLen - 2*shMargin) / (shCount - 1);
+      for(const sc of [lsCode, rsCode]){
+        const holes = [];
+        for(let h=0; h<shCount; h++) holes.push({x:shMargin+h*shSpacing, y:slideMountY});
+        drills.push({partCode:sc, opType:'slide_mount',
+          dia:cfg.slideHoleDia||4, dep:cfg.slideHoleDepth||10,
+          holes, heightStart:shMargin, spacing:shSpacing, count:shCount,
+          depthPositions:[slideMountY],
+          note:prefix+' side-mount slide holes'});
+      }
+    }
+
+    // ═══ FACE ═══
     if(drawerFaceType==='applied'){
       parts.push({code:code(), name:prefix+' Face', partType:'drawer_face',
         len:faceW, w:faceH, t:dmt||18, qty:1,
