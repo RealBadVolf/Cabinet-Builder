@@ -92,7 +92,7 @@ function NavBar() {
   const nav = useNavigate();
   return (
     <div className="nav">
-      <Link to="/" className="nav-brand" style={{ textDecoration: 'none' }}>◧ Cabinet Studio</Link>
+      <Link to="/" className="nav-brand" style={{ textDecoration: 'none' }}>◧ BadVolf's Cabinet Studio</Link>
       <div className="nav-links">
         <Link to="/designer" className="nav-link">Designer</Link>
         {user && <Link to="/projects" className="nav-link">Projects</Link>}
@@ -175,6 +175,11 @@ function LoginPage() {
       <div style={{ marginTop: 24, textAlign: 'center' }}>
         <Link to="/designer" style={{ fontSize: 11, color: '#8a7e6a' }}>
           → Continue as guest (design without saving)
+        </Link>
+      </div>
+      <div style={{ marginTop: 24, textAlign: 'center' }}>
+        <Link to="https://badvolf.com" style={{ fontSize: 11, color: '#8a7e6a' }}>
+          Desgined by John Mark Dougan, free to everyone. Problems or suggestions? go to my site and let me know. Enjoy!
         </Link>
       </div>
     </div>
@@ -546,7 +551,7 @@ function LandingPage() {
   return (
     <div style={{ textAlign: 'center', padding: '80px 24px' }}>
       <h1 style={{ fontSize: 28, fontWeight: 300, color: '#c49355', letterSpacing: -1, marginBottom: 8 }}>
-        ◧ Cabinet Studio
+        ◧ BadVolf's Cabinet Studio
       </h1>
       <p style={{ fontSize: 13, color: '#8a7e6a', maxWidth: 500, margin: '0 auto 32px', lineHeight: 1.7 }}>
         Parametric frameless cabinet design with automatic cut lists, dado/rabbet joinery,
