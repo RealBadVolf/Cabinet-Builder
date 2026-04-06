@@ -21,6 +21,7 @@ const DEFAULT_CONFIG = {
   height:760, width:600, depth:580,
   caseMaterialThickness:18, backPanelThickness:6, doorMaterialThickness:18,
   dadoDepth:10, dadoWidth:18, rabbetDepth:10, rabbetWidth:6,
+  dadoAllowance:0.2,
   toeKickHeight:100, toeKickRecess:75, toeKickStyle:'integral',
   shelfCount:1, shelfType:'adjustable', shelfSetback:5,
   pinDia:5, pinDepth:12, pinSpacing:32, pinRowsPerSide:2,
@@ -29,6 +30,8 @@ const DEFAULT_CONFIG = {
   drawerCount:0, nailerHeight:90, nailerCount:2,
   hingeBoreDia:35, hingeBoreDepth:13, hingeBoreFromEdge:22,
   handleType:'pull', handleLength:128,
+  legCount:0, legMargin:100, legHoleCount:4, legHoleDia:4,
+  legBoltCircle:45, legHoleDepth:12, legCenterHole:false, legCenterDia:5,
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -415,8 +418,31 @@ export default function CabinetStudio({ cabinetId, user, api }) {
               <Num label="Door" value={cfg.doorMaterialThickness} onChange={v=>u('doorMaterialThickness',v)} min={12} max={25}/>
               <div className="cs-sec">Toe Kick</div>
               <Sel label="Style" value={cfg.toeKickStyle} onChange={v=>u('toeKickStyle',v)} options={[['integral','Integral'],['separate_plinth','Sep. Plinth'],['legs','Legs'],['none','None']]}/>
-              {cfg.toeKickStyle!=='none'&&<><Num label="Height" value={cfg.toeKickHeight} onChange={v=>u('toeKickHeight',v)} min={50} max={200} step={5}/>
-              <Num label="Recess" value={cfg.toeKickRecess} onChange={v=>u('toeKickRecess',v)} min={20} max={100} step={5}/></>}
+              {cfg.toeKickStyle!=='none'&&cfg.toeKickStyle!=='legs'&&<>
+                <Num label="Height" value={cfg.toeKickHeight} onChange={v=>u('toeKickHeight',v)} min={50} max={200} step={5}/>
+                <Num label="Recess" value={cfg.toeKickRecess} onChange={v=>u('toeKickRecess',v)} min={20} max={100} step={5}/>
+              </>}
+              {cfg.toeKickStyle==='legs'&&<>
+                <Num label="Leg height" value={cfg.toeKickHeight} onChange={v=>u('toeKickHeight',v)} min={50} max={200} step={5}/>
+                <div className="cs-sec">Leg Mounting</div>
+                <Sel label="Leg count" value={cfg.legCount} onChange={v=>u('legCount',parseInt(v))}
+                  options={[['0','None'],['4','4 (corners)'],['5','5 (corners+center)'],['6','6 (corners+mid)'],['7','7'],['8','8']]}/>
+                {cfg.legCount>0&&<>
+                  <Num label="Margin" value={cfg.legMargin} onChange={v=>u('legMargin',v)} min={30} max={200} step={5}/>
+                  <Num label="Bolt circle Ø" value={cfg.legBoltCircle} onChange={v=>u('legBoltCircle',v)} min={20} max={80} step={1}/>
+                  <Num label="Screw holes" value={cfg.legHoleCount} onChange={v=>u('legHoleCount',parseInt(v)||4)} min={2} max={8} unit=""/>
+                  <Num label="Screw hole Ø" value={cfg.legHoleDia} onChange={v=>u('legHoleDia',v)} min={2} max={8} step={.5}/>
+                  <Num label="Hole depth" value={cfg.legHoleDepth} onChange={v=>u('legHoleDepth',v)} min={5} max={20} step={1}/>
+                  <Sel label="Center hole" value={cfg.legCenterHole?'yes':'no'} onChange={v=>u('legCenterHole',v==='yes')}
+                    options={[['no','No'],['yes','Yes']]}/>
+                  {cfg.legCenterHole&&<Num label="Center Ø" value={cfg.legCenterDia} onChange={v=>u('legCenterDia',v)} min={3} max={10} step={.5}/>}
+                  <div style={{marginTop:8,padding:'8px 10px',background:'#252119',borderRadius:4,fontSize:10,color:'#8a7e6a',lineHeight:1.6}}>
+                    {cfg.legCount} legs, {cfg.legHoleCount} screw holes each on Ø{cfg.legBoltCircle}mm bolt circle.
+                    Centers placed {cfg.legMargin}mm from panel edges.
+                    {cfg.legCount>=5&&' Includes center leg for heavy loads.'}
+                  </div>
+                </>}
+              </>}
               <div className="cs-sec">Nailers</div>
               <Num label="Height" value={cfg.nailerHeight} onChange={v=>u('nailerHeight',v)} min={50} max={150} step={5}/>
             </>}
@@ -424,11 +450,12 @@ export default function CabinetStudio({ cabinetId, user, api }) {
               <div className="cs-sec">Dado (Bottom & Shelves)</div>
               <Num label="Depth" value={cfg.dadoDepth} onChange={v=>u('dadoDepth',v)} min={3} max={15} step={.5}/>
               <Num label="Width" value={cfg.dadoWidth} onChange={v=>u('dadoWidth',v)} min={6} max={25} step={.5}/>
+              <Num label="Allowance" value={cfg.dadoAllowance} onChange={v=>u('dadoAllowance',v)} min={0} max={1} step={.05}/>
               <div className="cs-sec">Rabbet (Back Panel)</div>
               <Num label="Depth" value={cfg.rabbetDepth} onChange={v=>u('rabbetDepth',v)} min={3} max={15} step={.5}/>
               <Num label="Width" value={cfg.rabbetWidth} onChange={v=>u('rabbetWidth',v)} min={3} max={12} step={.5}/>
               <div style={{marginTop:16,padding:'10px 12px',background:'#252119',borderRadius:4,fontSize:10,color:'#8a7e6a',lineHeight:1.6}}>
-                <strong style={{color:'#d06838'}}>Tip:</strong> Dado width = case thickness ({cfg.caseMaterialThickness}mm). Rabbet width = back panel ({cfg.backPanelThickness}mm). Depth ≈ 55% of material.
+                <strong style={{color:'#d06838'}}>Tip:</strong> Material is {cfg.caseMaterialThickness}mm → dado cuts at {(cfg.caseMaterialThickness+(cfg.dadoAllowance||0)).toFixed(2)}mm (incl. {cfg.dadoAllowance||0}mm allowance). Set allowance to 0 for a perfect fit.
               </div>
             </>}
             {cfgSec==='shelves'&&<>
