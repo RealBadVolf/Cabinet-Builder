@@ -34,6 +34,7 @@ const DEFAULT_CONFIG = {
   legBoltCircle:45, legHoleDepth:12, legCenterHole:false, legCenterDia:5,
   shelfGrooves:true, shelfGrooveWidth:10, shelfGrooveDepth:10, shelfGrooveInset:12,
   drawers:[], drawerGap:3, drawerConstruction:'dado', drawerFaceType:'applied',
+  drawerPosition:'top',
   drawerSideThickness:15, drawerBottomThickness:6, drawerSlideType:'undermount',
   drawerSlideClearance:12.7, drawerBottomDadoHeight:10, drawerBottomDadoDepth:6,
   boxJointFingerWidth:20,
@@ -163,6 +164,9 @@ function DoorStyleThumb({style,size=56}){
 function FrontView({cfg,caseH,showDoors}){
   const {width,height,caseMaterialThickness:mt,toeKickHeight,toeKickRecess,
     doorCount,doorOverlay,doorGap,doorReveal,shelfCount,shelfType,nailerHeight,toeKickStyle}=cfg;
+  const drawers=cfg.drawers||[];
+  const drawerPos=cfg.drawerPosition||'top';
+  const drawerGapV=cfg.drawerGap||3;
   const vw=380,vh=420,pad=50;
   const tkH=toeKickStyle==='none'?0:toeKickHeight;
   const scale=Math.min((vw-2*pad)/width,(vh-2*pad)/height);
@@ -170,30 +174,97 @@ function FrontView({cfg,caseH,showDoors}){
   const ox=(vw-s(width))/2,oy=(vh-s(height))/2;
   const dStyle=DOOR_STYLES.find(d=>d.id===cfg.doorStyle)||DOOR_STYLES[0];
   const intH=caseH-2*mt;const shelves=[];
-  if(shelfCount>0){const sp=intH/(shelfCount+1);for(let i=1;i<=shelfCount;i++) shelves.push(mt+sp*i);}
+  if(shelfCount>0&&drawers.length===0){const sp=intH/(shelfCount+1);for(let i=1;i<=shelfCount;i++) shelves.push(mt+sp*i);}
+
+  // Calculate drawer zone height
+  const totalDrawerFaceH = drawers.reduce((s,d)=>(d.faceHeight||160)+drawerGapV+s, -drawerGapV);
+  const hasDrawers = drawers.length > 0;
+  const hasDoor = hasDrawers ? (doorCount > 0 && totalDrawerFaceH < caseH - mt) : (doorCount > 0);
+  const doorZoneH = hasDrawers ? caseH - totalDrawerFaceH - drawerGapV : caseH;
 
   return(
     <svg viewBox={`0 0 ${vw} ${vh}`} style={{width:'100%',maxWidth:400,display:'block',margin:'0 auto'}}>
       <defs><marker id="arr" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto">
         <path d="M0,1L6,3L0,5" fill="none" stroke="#8a7e6a" strokeWidth=".8"/></marker></defs>
       <text x={vw/2} y={16} textAnchor="middle" fill="#8a7e6a" fontSize="10" fontFamily="inherit" letterSpacing="1.5">FRONT VIEW</text>
-      {toeKickStyle!=='none'&&<rect x={ox+s(mt)+s(toeKickRecess)} y={oy+s(caseH)} width={s(width-2*mt-2*toeKickRecess)} height={s(tkH)} fill="#252119" stroke="#4a4030" strokeWidth=".8"/>}
+      {/* Toe kick */}
+      {toeKickStyle!=='none'&&toeKickStyle!=='legs'&&<rect x={ox+s(mt)+s(toeKickRecess)} y={oy+s(caseH)} width={s(width-2*mt-2*toeKickRecess)} height={s(tkH)} fill="#252119" stroke="#4a4030" strokeWidth=".8"/>}
+      {/* Side panels */}
       <rect x={ox} y={oy} width={s(mt)} height={s(caseH)} fill="#3a2e22" stroke="#4a4030" strokeWidth="1.2"/>
       <rect x={ox+s(width-mt)} y={oy} width={s(mt)} height={s(caseH)} fill="#3a2e22" stroke="#4a4030" strokeWidth="1.2"/>
+      {/* Bottom panel */}
       <rect x={ox+s(mt)} y={oy+s(caseH-mt-mt)} width={s(width-2*mt)} height={s(mt)} fill="rgba(208,104,56,.15)" stroke="#d06838" strokeWidth=".8"/>
+      {/* Top nailer */}
       <rect x={ox+s(mt)} y={oy} width={s(width-2*mt)} height={s(nailerHeight)} fill="#252119" stroke="#4a4030" strokeWidth=".6" opacity=".6"/>
+      {/* Shelves (only when no drawers) */}
       {shelves.map((pos,i)=><rect key={i} x={ox+s(mt)+2} y={oy+s(caseH-mt-pos)} width={s(width-2*mt)-4} height={s(mt)}
         fill="rgba(196,147,85,.1)" stroke="#c49355" strokeWidth=".7" strokeDasharray={shelfType==='adjustable'?'3 2':'0'}/>)}
-      {showDoors&&doorCount===1&&(()=>{const dw=s(width+2*doorOverlay-2*doorReveal),dh=s(caseH+2*doorOverlay-2*doorReveal);
+
+      {/* ═══ DRAWER FACES ═══ */}
+      {hasDrawers && showDoors && (()=>{
+        let stackY = drawerPos==='top' ? 0 : (doorZoneH > 0 && hasDoor ? doorZoneH + drawerGapV : 0);
+        return drawers.map((dr,i)=>{
+          const fH = dr.faceHeight || 160;
+          const fW = width + 2*doorOverlay - 2*doorReveal;
+          const dx = ox - s(doorOverlay - doorReveal);
+          const dy = oy - s(doorOverlay - doorReveal) + s(stackY);
+          stackY += fH + drawerGapV;
+          return <g key={'dr'+i}>
+            <rect x={dx} y={dy} width={s(fW)} height={s(fH)}
+              fill="rgba(70,55,38,.85)" stroke="#7a6a50" strokeWidth="1.2" rx="1"/>
+            {/* Pull handle */}
+            <rect x={dx+s(fW)/2-12} y={dy+s(fH)/2-1.5} width={24} height={3} rx={1.5}
+              fill="#c49355" opacity=".6"/>
+            {/* Label */}
+            <text x={dx+s(fW)/2} y={dy+s(fH)/2+14} textAnchor="middle"
+              fill="#8a7e6a" fontSize="8" fontFamily="inherit" opacity=".8">
+              D{i+1}: {fH}mm
+            </text>
+          </g>;
+        });
+      })()}
+
+      {/* ═══ DOOR (in remaining space when mixed with drawers) ═══ */}
+      {showDoors && hasDoor && hasDrawers && (()=>{
+        const doorH = doorZoneH;
+        if(doorH <= 0) return null;
+        const doorTop = drawerPos==='top' ? totalDrawerFaceH + drawerGapV : 0;
+        const dh = s(doorH + 2*doorOverlay - 2*doorReveal);
+        const dy = oy - s(doorOverlay - doorReveal) + s(doorTop);
+
+        if(doorCount===1){
+          const dw = s(width + 2*doorOverlay - 2*doorReveal);
+          const dx = ox - s(doorOverlay - doorReveal);
+          return <g><rect x={dx} y={dy} width={dw} height={dh} fill="rgba(60,48,34,.85)" stroke="#6a5a44" strokeWidth="1.5" rx="1"/>
+            <circle cx={dx+dw-s(25)} cy={dy+dh/2} r={3} fill="#c49355" opacity=".7"/>
+            <text x={dx+dw/2} y={dy+dh/2+4} textAnchor="middle" fill="#8a7e6a" fontSize="8" fontFamily="inherit" opacity=".8">
+              Door: {Math.round(doorH)}mm
+            </text></g>;
+        } else {
+          const dw = s(width/2+doorOverlay-doorGap/2-doorReveal);
+          const dx1 = ox - s(doorOverlay - doorReveal);
+          const dx2 = ox + s(width) - dw + s(doorOverlay - doorReveal);
+          return <g>
+            <rect x={dx1} y={dy} width={dw} height={dh} fill="rgba(60,48,34,.85)" stroke="#6a5a44" strokeWidth="1.5" rx="1"/>
+            <circle cx={dx1+dw-s(25)} cy={dy+dh/2} r={3} fill="#c49355" opacity=".7"/>
+            <rect x={dx2} y={dy} width={dw} height={dh} fill="rgba(60,48,34,.85)" stroke="#6a5a44" strokeWidth="1.5" rx="1"/>
+            <circle cx={dx2+s(25)} cy={dy+dh/2} r={3} fill="#c49355" opacity=".7"/></g>;
+        }
+      })()}
+
+      {/* ═══ DOORS (no drawers — original behavior) ═══ */}
+      {showDoors&&!hasDrawers&&doorCount===1&&(()=>{const dw=s(width+2*doorOverlay-2*doorReveal),dh=s(caseH+2*doorOverlay-2*doorReveal);
         const dx=ox-s(doorOverlay-doorReveal),dy=oy-s(doorOverlay-doorReveal);
         return <g><rect x={dx} y={dy} width={dw} height={dh} fill="rgba(60,48,34,.85)" stroke="#6a5a44" strokeWidth="1.5" rx="1"/>
           <circle cx={dx+dw-s(25)} cy={dy+dh/2} r={3} fill="#c49355" opacity=".7"/></g>;})()}
-      {showDoors&&doorCount===2&&(()=>{const dw=s(width/2+doorOverlay-doorGap/2-doorReveal),dh=s(caseH+2*doorOverlay-2*doorReveal);
+      {showDoors&&!hasDrawers&&doorCount===2&&(()=>{const dw=s(width/2+doorOverlay-doorGap/2-doorReveal),dh=s(caseH+2*doorOverlay-2*doorReveal);
         const dy=oy-s(doorOverlay-doorReveal),dx1=ox-s(doorOverlay-doorReveal),dx2=ox+s(width)-dw+s(doorOverlay-doorReveal);
         return <g><rect x={dx1} y={dy} width={dw} height={dh} fill="rgba(60,48,34,.85)" stroke="#6a5a44" strokeWidth="1.5" rx="1"/>
           <circle cx={dx1+dw-s(25)} cy={dy+dh/2} r={3} fill="#c49355" opacity=".7"/>
           <rect x={dx2} y={dy} width={dw} height={dh} fill="rgba(60,48,34,.85)" stroke="#6a5a44" strokeWidth="1.5" rx="1"/>
           <circle cx={dx2+s(25)} cy={dy+dh/2} r={3} fill="#c49355" opacity=".7"/></g>;})()}
+
+      {/* Dimension lines */}
       <line x1={ox} y1={oy+s(height)+18} x2={ox+s(width)} y2={oy+s(height)+18} stroke="#8a7e6a" strokeWidth=".7" markerStart="url(#arr)" markerEnd="url(#arr)"/>
       <text x={ox+s(width/2)} y={oy+s(height)+30} textAnchor="middle" fill="#8a7e6a" fontSize="9" fontFamily="inherit">{width}mm</text>
       <line x1={ox-18} y1={oy} x2={ox-18} y2={oy+s(height)} stroke="#8a7e6a" strokeWidth=".7" markerStart="url(#arr)" markerEnd="url(#arr)"/>
@@ -565,6 +636,15 @@ export default function CabinetStudio({ cabinetId, user, api }) {
                 </div>
               ))}
               {(cfg.drawers||[]).length>0&&<>
+                <div className="cs-sec">Drawer Position</div>
+                <Sel label="Position" value={cfg.drawerPosition||'top'} onChange={v=>u('drawerPosition',v)}
+                  options={[['top','Top (drawers above door)'],['bottom','Bottom (drawers below door)'],['full','Full (no door, drawers only)']]}/>
+                {(cfg.drawerPosition||'top')!=='full'&&
+                  <div style={{padding:'6px 10px',background:'#252119',borderRadius:4,fontSize:9,color:'#8a7e6a',lineHeight:1.5}}>
+                    Drawer zone: {(cfg.drawers||[]).reduce((s,d)=>(d.faceHeight||160)+(cfg.drawerGap||3)+s,-(cfg.drawerGap||3))}mm.
+                    Door zone: {Math.round(caseH - (cfg.drawers||[]).reduce((s,d)=>(d.faceHeight||160)+(cfg.drawerGap||3)+s,-(cfg.drawerGap||3)) - (cfg.drawerGap||3))}mm remaining.
+                    Set door count in the Doors tab.
+                  </div>}
                 <div className="cs-sec">Drawer Construction</div>
                 <Sel label="Joinery" value={cfg.drawerConstruction||'dado'} onChange={v=>u('drawerConstruction',v)}
                   options={[['dado','Dado Joint'],['box_joint','Box Joint (Finger)'],['dovetail','Dovetail'],['butt','Butt Joint'],['pocket_screw','Pocket Screw']]}/>

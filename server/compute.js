@@ -228,19 +228,35 @@ export function computeCabinet(cfg) {
   // ═══ DOORS ═══
   const dStyleObj=DOOR_STYLES[doorStyle]||DOOR_STYLES.shaker;
   const isRS=dStyleObj.rail>0;
-  const dH=caseH+2*doorOverlay-2*doorReveal;
+  const drawerPos = cfg.drawerPosition || 'top';
 
-  if(doorCount>0 && drawers.length===0){
-    // Only generate doors if no drawers (drawer cabinets have drawer faces instead)
+  // Calculate drawer zone height for mixed mode
+  const totalDrawerFaceH = drawers.length > 0
+    ? drawers.reduce((s,d) => s + (d.faceHeight || 160) + (cfg.drawerGap||3), -(cfg.drawerGap||3))
+    : 0;
+
+  // Determine if we should generate a door
+  const generateDoor = doorCount > 0 && (
+    drawers.length === 0 ||                        // no drawers → full door
+    (drawerPos !== 'full' && totalDrawerFaceH < caseH - mt)  // mixed → door in remaining space
+  );
+
+  if(generateDoor){
+    // Door height: full case if no drawers, otherwise remaining space
+    const doorZoneH = drawers.length > 0
+      ? caseH - totalDrawerFaceH - (cfg.drawerGap||3)
+      : caseH;
+    const dH = doorZoneH + 2*doorOverlay - 2*doorReveal;
+
     if(doorCount===1){
       const dW=width+2*doorOverlay-2*doorReveal;
       if(isRS) addDoorRS(parts,drills,code,dStyleObj,dH,dW,dmt,hingeBoreDia,hingeBoreDepth,hingeBoreFromEdge,'Door',doorStyle);
-      else { const dc=code(); parts.push({code:dc,name:'Door',partType:'door',len:dH,w:dW,t:dmt,qty:1,notes:'Slab. 2 hinges.'}); addHinges(drills,dc,dH,hingeBoreDia,hingeBoreDepth,hingeBoreFromEdge); }
+      else { const dc=code(); parts.push({code:dc,name:'Door',partType:'door',len:dH,w:dW,t:dmt,qty:1,notes:'Full overlay. '+Math.round(doorZoneH)+'mm zone.'}); addHinges(drills,dc,dH,hingeBoreDia,hingeBoreDepth,hingeBoreFromEdge); }
     } else if(doorCount===2){
       const dW=width/2+doorOverlay-doorGap/2-doorReveal;
       for(const label of ['L','R']){
         if(isRS) addDoorRS(parts,drills,code,dStyleObj,dH,dW,dmt,hingeBoreDia,hingeBoreDepth,hingeBoreFromEdge,'Door '+label,doorStyle);
-        else { const dc=code(); parts.push({code:dc,name:'Door ('+label+')',partType:'door',len:dH,w:dW,t:dmt,qty:1,notes:'Slab. 2 hinges.'}); addHinges(drills,dc,dH,hingeBoreDia,hingeBoreDepth,hingeBoreFromEdge); }
+        else { const dc=code(); parts.push({code:dc,name:'Door ('+label+')',partType:'door',len:dH,w:dW,t:dmt,qty:1,notes:doorGap+'mm gap. '+Math.round(doorZoneH)+'mm zone.'}); addHinges(drills,dc,dH,hingeBoreDia,hingeBoreDepth,hingeBoreFromEdge); }
       }
     }
   }
