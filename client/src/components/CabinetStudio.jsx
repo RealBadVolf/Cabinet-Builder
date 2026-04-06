@@ -36,6 +36,7 @@ const DEFAULT_CONFIG = {
   drawers:[], drawerGap:3, drawerConstruction:'dado', drawerFaceType:'applied',
   drawerSideThickness:15, drawerBottomThickness:6, drawerSlideType:'undermount',
   drawerSlideClearance:12.7, drawerBottomDadoHeight:10, drawerBottomDadoDepth:6,
+  boxJointFingerWidth:20,
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -268,29 +269,48 @@ export default function CabinetStudio({ cabinetId, user, api }) {
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
   const [loadingCab, setLoadingCab] = useState(!!cabinetId);
-  const [cabinetMeta, setCabinetMeta] = useState(null); // {cabinet_code, name, job_id, ...}
+  const [cabinetMeta, setCabinetMeta] = useState(null);
   const [dirty, setDirty] = useState(false);
 
+  // Server-computed data (source of truth for cut list + ops + DXF)
+  const [serverParts, setServerParts] = useState([]);
+  const [serverDados, setServerDados] = useState([]);
+  const [serverDrills, setServerDrills] = useState([]);
+
   const u = useCallback((k,v) => { setCfg(p=>({...p,[k]:v})); setDirty(true); setSaveMsg(''); }, []);
+
+  // Fetch full cabinet (parts + operations) from server
+  const fetchCabinetData = useCallback(async (cabId) => {
+    if (!api || !cabId) return;
+    try {
+      const cab = await api.getCabinet(cabId);
+      if (cab.parts) setServerParts(cab.parts);
+      if (cab.dados) setServerDados(cab.dados);
+      if (cab.drills) setServerDrills(cab.drills);
+      return cab;
+    } catch (err) { console.error('Fetch cabinet data:', err); }
+  }, [api]);
 
   // Load cabinet from API
   useEffect(() => {
     if (!cabinetId || !api) { setLoadingCab(false); return; }
-    api.getCabinet(cabinetId).then(cab => {
-      const config = typeof cab.config === 'string' ? JSON.parse(cab.config) : cab.config;
-      setCfg({...DEFAULT_CONFIG, ...config});
-      setCabinetMeta(cab);
-      setDirty(false);
+    fetchCabinetData(cabinetId).then(cab => {
+      if (cab) {
+        const config = typeof cab.config === 'string' ? JSON.parse(cab.config) : cab.config;
+        setCfg({...DEFAULT_CONFIG, ...config});
+        setCabinetMeta(cab);
+        setDirty(false);
+      }
     }).catch(err => {
       console.error('Failed to load cabinet:', err);
       setSaveMsg('Failed to load cabinet');
     }).finally(() => setLoadingCab(false));
-  }, [cabinetId, api]);
+  }, [cabinetId, api, fetchCabinetData]);
 
   // Compute
   const {parts,dados,drills,caseH,intW,totalParts,doorParts,dStyle} = useMemo(()=>computeAll(cfg),[cfg]);
 
-  // Save to API
+  // Save to API + re-fetch computed parts
   const handleSave = async () => {
     if (!api || !cabinetId || !user) return;
     setSaving(true); setSaveMsg('');
@@ -300,6 +320,8 @@ export default function CabinetStudio({ cabinetId, user, api }) {
         name: cabinetMeta?.name,
         cabinetType: cfg.cabinetType,
       });
+      // Re-fetch to get regenerated parts/dados/drills
+      await fetchCabinetData(cabinetId);
       setDirty(false);
       setSaveMsg('Saved ✓');
       setTimeout(() => setSaveMsg(''), 3000);
@@ -381,7 +403,12 @@ export default function CabinetStudio({ cabinetId, user, api }) {
           border:'1px solid #3a3228',padding:'5px 12px',borderRadius:3,cursor:'pointer',letterSpacing:'.5px',textTransform:'uppercase'}}
           onClick={()=>navigator.clipboard.writeText(exportText)}>Copy</button>
         {cabinetId && api && user && (()=>{
-          const thicknesses = [...new Set(parts.map(p=>p.t))].sort((a,b)=>b-a);
+          const allParts = serverParts.length > 0 ? serverParts : parts;
+          const thicknesses = [...new Set(
+            serverParts.length > 0
+              ? serverParts.map(p=>parseFloat(p.thickness))
+              : parts.map(p=>p.t)
+          )].sort((a,b)=>b-a);
           return thicknesses.map(t=>
             <a key={t} href={`/api/export/cabinet/${cabinetId}/dxf?thickness=${t}&token=${localStorage.getItem('cabinet_token')}`}
               style={{fontFamily:'inherit',fontSize:9,fontWeight:600,background:'transparent',color:'#64a0dc',
@@ -541,6 +568,14 @@ export default function CabinetStudio({ cabinetId, user, api }) {
                 <div className="cs-sec">Drawer Construction</div>
                 <Sel label="Joinery" value={cfg.drawerConstruction||'dado'} onChange={v=>u('drawerConstruction',v)}
                   options={[['dado','Dado Joint'],['box_joint','Box Joint (Finger)'],['dovetail','Dovetail'],['butt','Butt Joint'],['pocket_screw','Pocket Screw']]}/>
+                {(cfg.drawerConstruction||'dado')==='box_joint'&&<>
+                  <Num label="Finger width" value={cfg.boxJointFingerWidth||20} onChange={v=>u('boxJointFingerWidth',v)} min={6} max={40} step={1}/>
+                  <div style={{padding:'6px 10px',background:'#252119',borderRadius:4,fontSize:9,color:'#8a7e6a',lineHeight:1.5}}>
+                    Finger width must accommodate bit radius. With a {cfg.boxJointFingerWidth||20}mm finger and {cfg.drawerSideThickness||15}mm sides,
+                    you get {Math.floor((cfg.drawers?.[0]?.boxHeight||120)/(cfg.boxJointFingerWidth||20))} fingers per corner.
+                    Use dogbone fillets in Vectric for inside corners.
+                  </div>
+                </>}
                 <Sel label="Face type" value={cfg.drawerFaceType||'applied'} onChange={v=>u('drawerFaceType',v)}
                   options={[['applied','Applied (separate face)'],['integrated','Integrated (front IS face)'],['inset','Inset (flush)']]}/>
                 <Sel label="Slide type" value={cfg.drawerSlideType||'undermount'} onChange={v=>u('drawerSlideType',v)}
@@ -629,41 +664,80 @@ export default function CabinetStudio({ cabinetId, user, api }) {
 
     {/* ═══ CUT LIST TAB ═══ */}
     {tab==='cuts'&&<div style={{padding:'16px 20px',overflowX:'auto'}}>
-      <table><thead><tr><th>Part</th><th>Qty</th><th>Length</th><th>Width</th><th>Thick</th><th>Material</th><th>Notes</th></tr></thead>
-        <tbody>{parts.map((p,i)=><tr key={i}>
-          <td style={{fontWeight:500,whiteSpace:'nowrap'}}>{p.name}</td><td style={{textAlign:'center'}}>{p.qty}</td>
-          <td className="dim-val">{p.len}mm</td><td className="dim-val">{p.w}mm</td><td>{p.t}mm</td>
-          <td style={{fontSize:10}}>{p.mat}</td>
-          <td><span className="note">{p.notes}</span>{p.eb.length>0&&<div style={{marginTop:2}}>
-            <span className="badge" style={{background:'rgba(196,147,90,.12)',color:'#c49355'}}>edge band: {p.eb.join(', ')}</span></div>}</td>
-        </tr>)}</tbody></table>
-      {doorParts.length>0&&<><div style={{fontSize:9,fontWeight:600,color:'#c49355',letterSpacing:1.2,textTransform:'uppercase',marginTop:20,marginBottom:8,paddingBottom:6,borderBottom:'1px solid #332d24'}}>
-        Door R&S Components (per door)</div>
-        <table><thead><tr><th>Component</th><th>Width</th><th>Height</th><th>Notes</th></tr></thead>
-          <tbody>{doorParts.map((dp,i)=><tr key={i}><td style={{fontWeight:500}}>{dp.name}</td>
-            <td className="dim-val">{dp.w}mm</td><td className="dim-val">{dp.h}mm</td><td className="note">{dp.note||'—'}</td></tr>)}</tbody></table></>}
+      {serverParts.length>0 ? (<>
+        <div style={{fontSize:10,color:'#7aba6a',marginBottom:8}}>Showing {serverParts.length} parts from database (save to update)</div>
+        <table><thead><tr><th>Code</th><th>Part</th><th>Qty</th><th>Length</th><th>Width</th><th>Thick</th><th>Type</th><th>Notes</th></tr></thead>
+          <tbody>{serverParts.map((p,i)=><tr key={i}>
+            <td style={{fontSize:10,color:'#8a7e6a'}}>{p.part_code}</td>
+            <td style={{fontWeight:500,whiteSpace:'nowrap'}}>{p.name}</td>
+            <td style={{textAlign:'center'}}>{p.quantity}</td>
+            <td className="dim-val">{parseFloat(p.finished_length)}mm</td>
+            <td className="dim-val">{parseFloat(p.finished_width)}mm</td>
+            <td>{parseFloat(p.thickness)}mm</td>
+            <td><span className="badge" style={{background:'rgba(196,147,90,.12)',color:'#c49355'}}>{p.part_type}</span></td>
+            <td className="note">{p.notes||'—'}</td>
+          </tr>)}</tbody></table>
+      </>) : (<>
+        <div style={{fontSize:10,color:'#8a7e6a',marginBottom:8}}>Client-side preview ({totalParts} parts) — save to generate full cut list</div>
+        <table><thead><tr><th>Part</th><th>Qty</th><th>Length</th><th>Width</th><th>Thick</th><th>Material</th><th>Notes</th></tr></thead>
+          <tbody>{parts.map((p,i)=><tr key={i}>
+            <td style={{fontWeight:500,whiteSpace:'nowrap'}}>{p.name}</td><td style={{textAlign:'center'}}>{p.qty}</td>
+            <td className="dim-val">{p.len}mm</td><td className="dim-val">{p.w}mm</td><td>{p.t}mm</td>
+            <td style={{fontSize:10}}>{p.mat}</td>
+            <td><span className="note">{p.notes}</span>{p.eb&&p.eb.length>0&&<div style={{marginTop:2}}>
+              <span className="badge" style={{background:'rgba(196,147,90,.12)',color:'#c49355'}}>edge band: {p.eb.join(', ')}</span></div>}</td>
+          </tr>)}</tbody></table>
+      </>)}
     </div>}
 
     {/* ═══ OPERATIONS TAB ═══ */}
     {tab==='ops'&&<div style={{padding:'16px 20px',overflowX:'auto'}}>
-      <div style={{fontSize:9,fontWeight:600,color:'#d06838',letterSpacing:1.2,textTransform:'uppercase',marginBottom:8,paddingBottom:6,borderBottom:'1px solid #332d24'}}>
-        Dado & Rabbet Operations ({dados.length})</div>
-      <table><thead><tr><th>Part</th><th>Type</th><th>W × D</th><th>Length</th><th>Position</th><th>Notes</th></tr></thead>
-        <tbody>{dados.map((d,i)=><tr key={i}>
-          <td style={{fontWeight:500}}>{d.part}</td>
-          <td><span className={`badge ${d.type==='Dado'?'badge-dado':'badge-rab'}`}>{d.type}</span></td>
-          <td className="dim-val">{d.cutW}×{d.cutD}mm</td><td className="dim-val">{d.len}mm</td>
-          <td className="note">{d.pos}<div style={{opacity:.7,marginTop:1}}>{d.orient}</div></td>
-          <td className="note">{d.note}</td></tr>)}</tbody></table>
-      {drills.length>0&&<><div style={{fontSize:9,fontWeight:600,color:'#7aba6a',letterSpacing:1.2,textTransform:'uppercase',marginTop:24,marginBottom:8,paddingBottom:6,borderBottom:'1px solid #332d24'}}>
-        Drilling Operations ({drills.length})</div>
-        <table><thead><tr><th>Part</th><th>Type</th><th>Ø × Depth</th><th>Layout</th><th>Notes</th></tr></thead>
-          <tbody>{drills.map((d,i)=><tr key={i}>
+      {serverDados.length>0 ? (<>
+        <div style={{fontSize:9,fontWeight:600,color:'#d06838',letterSpacing:1.2,textTransform:'uppercase',marginBottom:8,paddingBottom:6,borderBottom:'1px solid #332d24'}}>
+          Dado & Rabbet Operations ({serverDados.length})</div>
+        <table><thead><tr><th>Part</th><th>Type</th><th>W × D</th><th>Length</th><th>From Edge</th><th>Notes</th></tr></thead>
+          <tbody>{serverDados.map((d,i)=><tr key={i}>
+            <td style={{fontWeight:500,fontSize:10}}>{d.part_id}</td>
+            <td><span className={`badge ${d.operation_type==='rabbet'?'badge-rab':'badge-dado'}`}>{d.operation_type}</span></td>
+            <td className="dim-val">{parseFloat(d.cut_width)}×{parseFloat(d.cut_depth)}mm</td>
+            <td className="dim-val">{d.cut_length?parseFloat(d.cut_length)+'mm':'—'}</td>
+            <td className="note">{d.from_reference_edge} @ {parseFloat(d.distance_from_edge)}mm</td>
+            <td className="note">{d.notes||'—'}</td>
+          </tr>)}</tbody></table>
+      </>) : (<>
+        <div style={{fontSize:9,fontWeight:600,color:'#d06838',letterSpacing:1.2,textTransform:'uppercase',marginBottom:8,paddingBottom:6,borderBottom:'1px solid #332d24'}}>
+          Dado & Rabbet Operations ({dados.length})</div>
+        <table><thead><tr><th>Part</th><th>Type</th><th>W × D</th><th>Length</th><th>Position</th><th>Notes</th></tr></thead>
+          <tbody>{dados.map((d,i)=><tr key={i}>
             <td style={{fontWeight:500}}>{d.part}</td>
-            <td><span className="badge badge-drill">{d.type}</span></td>
-            <td className="dim-val">Ø{d.dia}×{d.dep}mm</td>
-            <td className="note"><div>{d.count}</div><div>{d.rows} rows, inset {d.inset}</div><div>{d.spacing} spacing</div><div>From: {d.start}</div></td>
-            <td className="note">{d.note}</td></tr>)}</tbody></table></>}
+            <td><span className={`badge ${d.type==='Dado'?'badge-dado':'badge-rab'}`}>{d.type}</span></td>
+            <td className="dim-val">{d.cutW}×{d.cutD}mm</td><td className="dim-val">{d.len}mm</td>
+            <td className="note">{d.pos}<div style={{opacity:.7,marginTop:1}}>{d.orient}</div></td>
+            <td className="note">{d.note}</td></tr>)}</tbody></table>
+      </>)}
+
+      {(serverDrills.length>0||drills.length>0)&&<>
+        <div style={{fontSize:9,fontWeight:600,color:'#7aba6a',letterSpacing:1.2,textTransform:'uppercase',marginTop:24,marginBottom:8,paddingBottom:6,borderBottom:'1px solid #332d24'}}>
+          Drilling Operations ({serverDrills.length||drills.length})</div>
+        {serverDrills.length>0 ? (
+          <table><thead><tr><th>Type</th><th>Ø × Depth</th><th>Count</th><th>Spacing</th><th>Notes</th></tr></thead>
+            <tbody>{serverDrills.map((d,i)=><tr key={i}>
+              <td><span className="badge badge-drill">{d.operation_type}</span></td>
+              <td className="dim-val">Ø{parseFloat(d.hole_diameter)}×{parseFloat(d.hole_depth)}mm</td>
+              <td>{d.hole_count||'—'}</td>
+              <td>{d.hole_spacing?parseFloat(d.hole_spacing)+'mm':'—'}</td>
+              <td className="note">{d.notes||'—'}</td>
+            </tr>)}</tbody></table>
+        ) : (
+          <table><thead><tr><th>Part</th><th>Type</th><th>Ø × Depth</th><th>Layout</th><th>Notes</th></tr></thead>
+            <tbody>{drills.map((d,i)=><tr key={i}>
+              <td style={{fontWeight:500}}>{d.part}</td>
+              <td><span className="badge badge-drill">{d.type}</span></td>
+              <td className="dim-val">Ø{d.dia}×{d.dep}mm</td>
+              <td className="note"><div>{d.count}</div><div>{d.rows} rows, inset {d.inset}</div><div>{d.spacing} spacing</div><div>From: {d.start}</div></td>
+              <td className="note">{d.note}</td></tr>)}</tbody></table>
+        )}
+      </>}
     </div>}
     </div>
   );
