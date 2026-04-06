@@ -182,6 +182,12 @@ function LoginPage() {
           Desgined by John Mark Dougan, free to everyone. Problems or suggestions? go to my site and let me know. Enjoy!
         </Link>
       </div>
+
+        <div style={{ marginTop: 24, textAlign: 'center' }}>
+        <Link to="https://badvolf.ru" style={{ fontSize: 11, color: '#8a7e6a' }}>
+          Разработано Джоном Марком Дуганом, доступно всем бесплатно. Проблемы или предложения? Зайдите на мой сайт и сообщите мне. Приятного использования!
+        </Link>
+      </div>
     </div>
   );
 }
